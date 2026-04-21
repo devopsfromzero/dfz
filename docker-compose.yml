@@ -1,0 +1,337 @@
+# ========================================
+# DFZ — Production Deployment
+# Kubernetes & Docker management dashboard
+# ========================================
+#
+# Quick start:
+#   cp .env.example .env      # edit APP_URL / UI_PORT as needed
+#   docker compose pull
+#   docker compose up -d
+#   open http://localhost:3080
+#
+# Default credentials on first run:
+#   username: admin
+#   password: admin        # change immediately in Settings
+#
+# Security model:
+#   PostgreSQL uses trust auth on the internal Docker network only.
+#   The PG port is never exposed to the host. Role separation
+#   (dfz_backend / dfz_terminal) enforces schema-level least-privilege.
+#   Override by setting PG_PASSWORD in .env to enable password auth.
+#
+# Source repository (private): https://github.com/devopsfromzero/dfz
+# Image registry (public):     https://github.com/devopsfromzero?tab=packages
+
+services:
+  # ========================================
+  # Backend — FastAPI (stateless, multi-worker)
+  # ========================================
+  backend:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${TAG:-latest}
+    pull_policy: always
+    container_name: dfz-backend
+    restart: unless-stopped
+
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
+      - ENABLE_DEBUG_LOGS=false
+
+      # Token settings
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - ALGORITHM=HS256
+      - ENABLE_TOKEN_ROTATION=${ENABLE_TOKEN_ROTATION:-false}
+
+      # Cookie security
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
+
+      # CORS — must match your external access URL
+      - CORS_ALLOWED_ORIGINS=${APP_URL:-http://localhost:3080}
+
+      # PostgreSQL (internal network, trust auth)
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DATABASE=dfz
+      - PG_POOL_MIN_SIZE=${PG_POOL_MIN_SIZE:-2}
+      - PG_POOL_MAX_SIZE=${PG_POOL_MAX_SIZE:-20}
+
+      # Performance flags — all default ON; override to disable.
+      - THREAD_POOL_MAX_WORKERS=${THREAD_POOL_MAX_WORKERS:-64}
+      - SINGLEFLIGHT_ENABLED=${SINGLEFLIGHT_ENABLED:-true}
+      - SWR_CACHE_ENABLED=${SWR_CACHE_ENABLED:-true}
+      - DASHBOARD_SNAPSHOT_JOB_ENABLED=${DASHBOARD_SNAPSHOT_JOB_ENABLED:-true}
+      - RBAC_CACHE_ENABLED=${RBAC_CACHE_ENABLED:-true}
+
+      # Redis cache (falls back to in-memory if unreachable)
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_MAX_CONNECTIONS=${REDIS_MAX_CONNECTIONS:-50}
+      - USE_REDIS_CACHE=${USE_REDIS_CACHE:-true}
+
+      # Async K8s + pagination
+      - USE_DISTRIBUTED_SINGLEFLIGHT=${USE_DISTRIBUTED_SINGLEFLIGHT:-true}
+      - USE_BACKEND_PAGINATION=${USE_BACKEND_PAGINATION:-true}
+      - USE_ASYNC_K8S_PODS=${USE_ASYNC_K8S_PODS:-true}
+      - USE_ASYNC_K8S_DEPLOYMENTS=${USE_ASYNC_K8S_DEPLOYMENTS:-true}
+      - USE_ASYNC_K8S_STATEFULSETS=${USE_ASYNC_K8S_STATEFULSETS:-true}
+      - USE_ASYNC_K8S_DAEMONSETS=${USE_ASYNC_K8S_DAEMONSETS:-true}
+      - USE_ASYNC_K8S_SERVICES=${USE_ASYNC_K8S_SERVICES:-true}
+      - USE_ASYNC_K8S_NAMESPACES=${USE_ASYNC_K8S_NAMESPACES:-true}
+      - USE_ASYNC_K8S_CONFIGMAPS=${USE_ASYNC_K8S_CONFIGMAPS:-true}
+      - USE_ASYNC_K8S_SECRETS=${USE_ASYNC_K8S_SECRETS:-true}
+      - USE_ASYNC_K8S_NODES=${USE_ASYNC_K8S_NODES:-true}
+      - USE_ASYNC_K8S_METRICS=${USE_ASYNC_K8S_METRICS:-true}
+      - USE_ASYNC_K8S_REPLICASETS=${USE_ASYNC_K8S_REPLICASETS:-true}
+      - USE_ASYNC_K8S_JOBS=${USE_ASYNC_K8S_JOBS:-true}
+      - USE_ASYNC_K8S_CRONJOBS=${USE_ASYNC_K8S_CRONJOBS:-true}
+
+      # Informer cache + SSE push
+      - USE_INFORMER_CACHE=${USE_INFORMER_CACHE:-true}
+      - USE_SSE_PUSH=${USE_SSE_PUSH:-true}
+      - INFORMER_PODS_ENABLED=${INFORMER_PODS_ENABLED:-true}
+      - INFORMER_DEPLOYMENTS_ENABLED=${INFORMER_DEPLOYMENTS_ENABLED:-true}
+      - INFORMER_SERVICES_ENABLED=${INFORMER_SERVICES_ENABLED:-true}
+      - INFORMER_NAMESPACES_ENABLED=${INFORMER_NAMESPACES_ENABLED:-true}
+      - INFORMER_STATEFULSETS_ENABLED=${INFORMER_STATEFULSETS_ENABLED:-true}
+      - INFORMER_DAEMONSETS_ENABLED=${INFORMER_DAEMONSETS_ENABLED:-true}
+      - INFORMER_PROCESS_SOFT_LIMIT_MB=${INFORMER_PROCESS_SOFT_LIMIT_MB:-1500}
+      - INFORMER_PROCESS_HARD_LIMIT_MB=${INFORMER_PROCESS_HARD_LIMIT_MB:-2000}
+
+    volumes:
+      - backend-secrets:/app/data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - dfz-network
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # ========================================
+  # Terminal — stateful exec/SSH sessions (single-worker)
+  # ========================================
+  terminal:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TAG:-latest}
+    pull_policy: always
+    container_name: dfz-terminal
+    restart: unless-stopped
+
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
+      - ENABLE_DEBUG_LOGS=false
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - ALGORITHM=HS256
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
+      - CORS_ALLOWED_ORIGINS=${APP_URL:-http://localhost:3080}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DATABASE=dfz
+
+    volumes:
+      - backend-secrets:/app/data:ro
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+    networks:
+      - dfz-network
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # ========================================
+  # UI — Next.js frontend
+  # ========================================
+  ui:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${TAG:-latest}
+    pull_policy: always
+    container_name: dfz-ui
+    restart: unless-stopped
+
+    environment:
+      - NODE_ENV=production
+      - BACKEND_URL=http://backend:8000
+      - TERMINAL_BACKEND_URL=http://terminal:8001
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+
+    ports:
+      - "${UI_PORT:-3080}:3000"
+
+    networks:
+      - dfz-network
+
+    depends_on:
+      backend:
+        condition: service_healthy
+      terminal:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ========================================
+  # PostgreSQL — persistent store
+  # ========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: dfz-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: dfz
+      POSTGRES_USER: dfz
+      POSTGRES_HOST_AUTH_METHOD: trust
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - dfz-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dfz -d dfz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ========================================
+  # Redis — cache (not load-bearing)
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: dfz-redis
+    restart: unless-stopped
+
+    command:
+      - "redis-server"
+      - "--maxmemory"
+      - "${REDIS_MAXMEMORY:-2gb}"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--tcp-keepalive"
+      - "60"
+
+    volumes:
+      - redis-data:/data
+
+    networks:
+      - dfz-network
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2560M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  dfz-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  backend-secrets:
+    driver: local
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
