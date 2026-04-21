@@ -10,8 +10,8 @@ DFZ gives you a single UI to manage Kubernetes clusters, Docker hosts, terminals
 ## Quick start
 
 ```bash
-git clone https://github.com/devopsfromzero/dfz-deploy.git
-cd dfz-deploy
+git clone https://github.com/devopsfromzero/dfz.git
+cd dfz
 cp .env.example .env      # edit APP_URL / UI_PORT if needed
 docker compose pull
 docker compose up -d
@@ -101,7 +101,7 @@ docker compose down -v       # also delete volumes (⚠️ deletes your data)
 
 ## Support
 
-Found a bug or have a feature request? [Open an issue](https://github.com/devopsfromzero/dfz-deploy/issues).
+Found a bug or have a feature request? [Open an issue](https://github.com/devopsfromzero/dfz/issues).
 
 ## License
 
