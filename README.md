@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Images](https://img.shields.io/badge/images-ghcr.io-blue)](https://github.com/devopsfromzero?tab=packages)
 
-DFZ gives you a single UI to manage Kubernetes clusters, Docker hosts, terminals, and deployment workflows — all running from your own infrastructure. This repository contains only the deployment manifests; the application source is at [devopsfromzero/dfz](https://github.com/devopsfromzero/dfz) (private).
+DFZ gives you a single UI to manage Kubernetes clusters, Docker hosts, terminals, and deployment workflows — all running from your own infrastructure.
 
 ## Quick start
 
@@ -101,8 +101,7 @@ docker compose down -v       # also delete volumes (⚠️ deletes your data)
 
 ## Support
 
-- Issues (deployment): this repository
-- Issues (application bugs): [devopsfromzero/dfz](https://github.com/devopsfromzero/dfz)
+Found a bug or have a feature request? [Open an issue](https://github.com/devopsfromzero/dfz-deploy/issues).
 
 ## License
 
