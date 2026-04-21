@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in the deploy stack or packaged image is broken
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more context you provide, the faster we can narrow down the issue.
+
+        ⚠️ If this is a **security vulnerability**, please do not open a public issue — use the private [Security Advisory form](https://github.com/devopsfromzero/dfz/security/advisories/new) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly. What did you do, what did you see, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. `git clone ...`
+        2. `cp .env.example .env`
+        3. `docker compose up -d`
+        4. Open http://localhost:3080
+        5. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: input
+    id: tag
+    attributes:
+      label: DFZ image tag
+      description: Value of `TAG` in `.env`, or `latest` if unset.
+      placeholder: "latest"
+    validations:
+      required: true
+
+  - type: input
+    id: docker
+    attributes:
+      label: Docker & Compose versions
+      description: Output of `docker version --format '{{.Server.Version}}'` and `docker compose version --short`
+      placeholder: "Docker 27.3.1, Compose v2.30.0"
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host OS
+      placeholder: "Ubuntu 24.04 / macOS 14 / Windows 11 + WSL2 / ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Output of `docker compose logs <service> --tail 100` for the affected service(s). Redact anything sensitive.
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I have searched existing issues and this is not a duplicate
+          required: true
+        - label: I have read the [README Troubleshooting](../../blob/main/README.md#troubleshooting) section
+          required: true
