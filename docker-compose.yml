@@ -4,7 +4,6 @@
 # ========================================
 #
 # Quick start:
-#   cp .env.example .env      # edit APP_URL / UI_PORT as needed
 #   docker compose pull
 #   docker compose up -d
 #   open http://localhost:3080
@@ -13,15 +12,33 @@
 #   username: admin
 #   password: admin        # change immediately in Settings
 #
+# Configuration:
+#   All tunables have sensible defaults baked into this file via
+#   ${VAR:-default} substitution. To change a value, edit the line
+#   directly below and run `docker compose up -d`.
+#
+#   Common overrides (search for the variable name):
+#     APP_URL           External URL the dashboard is served at (CORS + cookies)
+#     UI_PORT           Host port mapping for the UI (container listens on 3000)
+#     TAG / REGISTRY    Pin to a specific image version (per service image: line)
+#     SECURE_COOKIES    Set to true when serving over HTTPS
+#     COOKIE_SAMESITE   strict | lax | none (none requires SECURE_COOKIES=true)
+#     LOG_LEVEL         DEBUG | INFO | WARNING | ERROR
+#
+#   Advanced knobs (feature flags, pool sizing, informer tuning,
+#   rollback playbook): docs/ADVANCED.md
+#
 # Security model:
 #   PostgreSQL uses trust auth on the internal Docker network only.
 #   The PG port is never exposed to the host. Role separation
 #   (dfz_backend / dfz_terminal) enforces schema-level least-privilege.
-#   Override by setting PG_PASSWORD in .env to enable password auth.
+#   Override by adding PG_PASSWORD to the postgres service environment
+#   block below to enable password auth.
 #
 # Every backend feature flag defaults to ON in the image. To roll back
-# a specific subsystem (e.g. USE_REDIS_CACHE=false), add the override
-# to .env and run `docker compose up -d`. Full catalog: docs/ADVANCED.md
+# a specific subsystem (e.g. USE_REDIS_CACHE=false), add it to the
+# backend service `environment:` block below and run `docker compose up -d`.
+# Full catalog: docs/ADVANCED.md
 #
 
 services:

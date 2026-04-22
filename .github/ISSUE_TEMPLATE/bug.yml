@@ -23,10 +23,9 @@ body:
       label: Steps to reproduce
       placeholder: |
         1. `git clone ...`
-        2. `cp .env.example .env`
-        3. `docker compose up -d`
-        4. Open http://localhost:3080
-        5. ...
+        2. `docker compose up -d`
+        3. Open http://localhost:3080
+        4. ...
     validations:
       required: true
 
@@ -41,7 +40,7 @@ body:
     id: tag
     attributes:
       label: DFZ image tag
-      description: Value of `TAG` in `.env`, or `latest` if unset.
+      description: Value of `TAG` in `docker-compose.yml`, or `latest` if unset.
       placeholder: "latest"
     validations:
       required: true

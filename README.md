@@ -12,7 +12,6 @@ DFZ gives you a single UI to manage Kubernetes clusters, Docker hosts, terminals
 ```bash
 git clone https://github.com/devopsfromzero/dfz.git
 cd dfz
-cp .env.example .env      # edit APP_URL / UI_PORT if needed
 docker compose pull
 docker compose up -d
 ```
@@ -54,16 +53,16 @@ Only the UI port is exposed to the host. All inter-service traffic stays on the 
 
 ## Configuration
 
-Everything is configured via environment variables in `.env`. See [`.env.example`](.env.example) for the operator-facing list.
+All configuration is defined as defaults directly in `docker-compose.yml` — there is no separate `.env` file. To override a default, edit the relevant value in the compose file, then run `docker compose up -d`.
 
-Most common overrides:
+Common overrides (search for the variable name in `docker-compose.yml`):
 
-```env
-APP_URL=https://dashboard.example.com   # must match your access URL for CORS
-UI_PORT=8080                             # change if 3080 is taken
-SECURE_COOKIES=true                      # enable when behind HTTPS
-TAG=v0.1.0                               # pin to a specific release
-```
+| Variable | Where it lives | Purpose |
+|---|---|---|
+| `APP_URL` | `backend.environment` → `CORS_ALLOWED_ORIGINS` | External URL used by the browser (for CORS + cookies) |
+| `UI_PORT` | `ui.ports` | Host port mapped to the UI container |
+| `SECURE_COOKIES` | `backend` / `terminal` / `ui` environment blocks | Set to `true` when serving behind HTTPS |
+| Image `TAG` | Each service's `image:` line | Pin to a specific release (e.g. `:v0.1.0`) |
 
 Rolling back a subsystem (Redis, informers, etc.) or tuning performance knobs? See [`docs/ADVANCED.md`](docs/ADVANCED.md).
 
@@ -74,15 +73,15 @@ docker compose pull
 docker compose up -d
 ```
 
-To pin a version, set `TAG` in `.env` and repeat. Available tags at [ghcr.io/devopsfromzero](https://github.com/devopsfromzero?tab=packages).
+To pin a specific version, replace `:latest` in each `image:` line of `docker-compose.yml` with a versioned tag like `:v0.1.0`, then re-run the pull/up commands. Available tags at [ghcr.io/devopsfromzero](https://github.com/devopsfromzero?tab=packages).
 
 ## Troubleshooting
 
 **UI loads but can't log in / CORS error.**
-Set `APP_URL` in `.env` to the exact URL you use in the browser (protocol + host + port), then `docker compose up -d` to apply.
+In `docker-compose.yml`, change the default `${APP_URL:-http://localhost:3080}` in the `backend` service's `CORS_ALLOWED_ORIGINS` line to the exact URL you use in the browser (protocol + host + port). Then `docker compose up -d` to apply.
 
 **Cookies not persisting behind a reverse proxy.**
-Set `SECURE_COOKIES=true` in `.env`. This requires HTTPS end-to-end.
+Set `SECURE_COOKIES=true` in the `backend`, `terminal`, and `ui` environment blocks of `docker-compose.yml`. This requires HTTPS end-to-end.
 
 **Backend unhealthy after upgrade.**
 Check logs: `docker compose logs backend --tail 100`. If the schema migration failed, restart once more — migrations are idempotent.

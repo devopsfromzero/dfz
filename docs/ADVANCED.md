@@ -1,21 +1,24 @@
 # Advanced Configuration
 
-Every knob documented in [`.env.example`](../.env.example) is the short list operators actually need. This file covers the long tail — internal feature flags, performance tuning beyond the defaults, and rollback paths.
+Every knob exposed as a default in [`docker-compose.yml`](../docker-compose.yml) is the short list operators actually need. This file covers the long tail — internal feature flags, performance tuning beyond the defaults, and rollback paths.
 
 Everything listed here is **optional**. The defaults ship in the container image; you don't need to set any of these for a working install. They exist so you can disable a misbehaving subsystem without rebuilding an image.
 
 ## How overrides work
 
-All flags are read from environment variables at backend startup. To override one:
+All flags are read from environment variables at backend startup. To override one, edit the `docker-compose.yml` file directly: add the flag to the `environment:` block of the service that reads it (usually `backend`), then apply:
 
-1. Add it to your `.env` (at the same directory as `docker-compose.yml`).
-2. `docker compose up -d` — Compose re-reads `.env` and recreates affected containers.
+```bash
+docker compose up -d
+```
 
-Example:
+Example — adding two overrides to the `backend` service's `environment:` block in `docker-compose.yml`:
 
-```env
-USE_REDIS_CACHE=false
-INFORMER_PODS_ENABLED=false
+```yaml
+    environment:
+      # ... existing entries ...
+      - USE_REDIS_CACHE=false
+      - INFORMER_PODS_ENABLED=false
 ```
 
 Boolean flags accept: `true`, `1`, `yes`, `on` (case-insensitive). Anything else is treated as false.
@@ -94,7 +97,7 @@ All default to `true`. Disabling one stops the informer for that type; reads sti
 
 ## Performance tuning
 
-These are already surfaced in [`.env.example`](../.env.example) under *Resource tuning (advanced)* — documented here for completeness.
+These are already exposed as defaults in [`docker-compose.yml`](../docker-compose.yml) on the `backend` service under *Resource tuning* — documented here for completeness.
 
 | Variable | Default | Notes |
 |----------|---------|-------|
@@ -133,8 +136,8 @@ Only relevant when `USE_DISTRIBUTED_SINGLEFLIGHT=true` (the default). Most insta
 
 Something regressed after you upgraded images? Try in order:
 
-1. **Pin the previous tag.** Set `TAG=v<previous-release>` in `.env`, then `docker compose pull && docker compose up -d`.
-2. **Disable the suspected subsystem.** Add the relevant flag to `.env` (e.g. `USE_INFORMER_CACHE=false`), then `docker compose up -d`. The backend falls back to direct K8s calls on every read — slower, but functional.
+1. **Pin the previous tag.** Replace `:latest` with `:v<previous-release>` in each `image:` line of `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
+2. **Disable the suspected subsystem.** Add the relevant flag to the `backend` service's `environment:` block in `docker-compose.yml` (e.g. `- USE_INFORMER_CACHE=false`), then `docker compose up -d`. The backend falls back to direct K8s calls on every read — slower, but functional.
 3. **Drop cache state.** `docker compose restart redis` clears the cache without touching persistent data. (Postgres and `backend-secrets` volumes are preserved.)
 
 If none of that helps, open a bug report with `docker compose logs backend --tail 500`.

@@ -1,6 +1,6 @@
 # Contributing to DFZ
 
-Thanks for your interest! This repository ships **deployment manifests** — the `docker-compose.yml`, `.env.example`, docs, and community files. The application source code is maintained privately and published only as container images on `ghcr.io/devopsfromzero`.
+Thanks for your interest! This repository ships **deployment manifests** — the `docker-compose.yml`, docs, and community files. The application source code is maintained privately and published only as container images on `ghcr.io/devopsfromzero`.
 
 ## What you can contribute here
 
@@ -23,7 +23,7 @@ Use the **Bug report** issue template. Include:
   docker compose logs ui --tail 100
   ```
 - Your `docker --version` and `docker compose version`
-- The image tag you're running (`TAG` in `.env`, or `latest`)
+- The image tag you're running (`TAG` in `docker-compose.yml`, or `latest`)
 
 ## Submitting changes
 
@@ -40,7 +40,7 @@ Use the **Bug report** issue template. Include:
 
 - [ ] `docker compose config` succeeds (no YAML errors)
 - [ ] `docker compose up -d` works end-to-end on a fresh environment
-- [ ] README / `.env.example` updated if you added or changed env variables
+- [ ] README / `docker-compose.yml` defaults updated if you added or changed env variables
 - [ ] No secrets committed (checked with `git diff --staged`)
 
 ## Cross-cutting changes

@@ -34,10 +34,9 @@ Only the most recent release receives security fixes. Older versions (including 
 
 **In scope**
 - Vulnerabilities in the packaged container images (`ghcr.io/devopsfromzero/dfz-*`)
-- The `docker-compose.yml` in this repository
-- Default configuration in `.env.example`
+- The `docker-compose.yml` in this repository, including its embedded defaults
 
 **Out of scope**
-- User-provided overrides (custom `.env`, reverse proxy config, TLS termination)
+- User-provided overrides (custom `docker-compose.yml` edits, reverse proxy config, TLS termination)
 - Third-party images pinned in `docker-compose.yml` (postgres, redis) — report upstream
 - Brute-force / rate-limit issues against deployments exposed without a reverse proxy (deploy behind one)
