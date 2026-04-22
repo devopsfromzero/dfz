@@ -19,7 +19,7 @@
 #   (dfz_backend / dfz_terminal) enforces schema-level least-privilege.
 #   Override by setting PG_PASSWORD in .env to enable password auth.
 #
-# Source repository (private): https://github.com/devopsfromzero/dfz
+# Source repository (private): https://github.com/devopsfromzero/dfz-src
 # Image registry (public):     https://github.com/devopsfromzero?tab=packages
 
 services:
