@@ -23,8 +23,6 @@
 # a specific subsystem (e.g. USE_REDIS_CACHE=false), add the override
 # to .env and run `docker compose up -d`. Full catalog: docs/ADVANCED.md
 #
-# Source repository (private): https://github.com/devopsfromzero/dfz-src
-# Image registry (public):     https://github.com/devopsfromzero?tab=packages
 
 services:
   # ========================================
