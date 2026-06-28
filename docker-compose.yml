@@ -42,6 +42,29 @@
 # Full catalog: docs/ADVANCED.md
 #
 
+# Shared backend/worker environment (DRY) — the API backend and the jobs worker
+# run the SAME image + config, differing ONLY in DFZ_RUN_JOBS.
+x-app-env: &app-env
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "${LOG_LEVEL:-WARNING}"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-120}"
+  REFRESH_TOKEN_EXPIRE_DAYS: "${REFRESH_TOKEN_EXPIRE_DAYS:-7}"
+  ALGORITHM: "HS256"
+  ENABLE_TOKEN_ROTATION: "${ENABLE_TOKEN_ROTATION:-false}"
+  SECURE_COOKIES: "${SECURE_COOKIES:-false}"
+  COOKIE_SAMESITE: "${COOKIE_SAMESITE:-lax}"
+  CORS_ALLOWED_ORIGINS: "${APP_URL:-http://localhost:3080}"
+  PG_HOST: "postgres"
+  PG_PORT: "5432"
+  PG_DATABASE: "dfz"
+  PG_POOL_MIN_SIZE: "${PG_POOL_MIN_SIZE:-2}"
+  PG_POOL_MAX_SIZE: "${PG_POOL_MAX_SIZE:-20}"
+  REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+  REDIS_MAX_CONNECTIONS: "${REDIS_MAX_CONNECTIONS:-50}"
+  THREAD_POOL_MAX_WORKERS: "${THREAD_POOL_MAX_WORKERS:-64}"
+  INFORMER_PROCESS_SOFT_LIMIT_MB: "${INFORMER_PROCESS_SOFT_LIMIT_MB:-1500}"
+  INFORMER_PROCESS_HARD_LIMIT_MB: "${INFORMER_PROCESS_HARD_LIMIT_MB:-2000}"
+
 services:
   # ========================================
   # Backend — FastAPI (stateless, multi-worker)
@@ -53,35 +76,11 @@ services:
     restart: unless-stopped
 
     environment:
-      - ENVIRONMENT=production
-      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
-
-      # Tokens + cookies
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
-      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-      - ALGORITHM=HS256
-      - ENABLE_TOKEN_ROTATION=${ENABLE_TOKEN_ROTATION:-false}
-      - SECURE_COOKIES=${SECURE_COOKIES:-false}
-      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
-
-      # CORS — must match the URL the browser uses
-      - CORS_ALLOWED_ORIGINS=${APP_URL:-http://localhost:3080}
-
-      # PostgreSQL (internal network, trust auth)
-      - PG_HOST=postgres
-      - PG_PORT=5432
-      - PG_DATABASE=dfz
-      - PG_POOL_MIN_SIZE=${PG_POOL_MIN_SIZE:-2}
-      - PG_POOL_MAX_SIZE=${PG_POOL_MAX_SIZE:-20}
-
-      # Redis (falls back to in-memory if unreachable)
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - REDIS_MAX_CONNECTIONS=${REDIS_MAX_CONNECTIONS:-50}
-
-      # Resource tuning
-      - THREAD_POOL_MAX_WORKERS=${THREAD_POOL_MAX_WORKERS:-64}
-      - INFORMER_PROCESS_SOFT_LIMIT_MB=${INFORMER_PROCESS_SOFT_LIMIT_MB:-1500}
-      - INFORMER_PROCESS_HARD_LIMIT_MB=${INFORMER_PROCESS_HARD_LIMIT_MB:-2000}
+      # Shared config via the x-app-env anchor (top of file).
+      <<: *app-env
+      # API-only — the dedicated `worker` service runs the leader-only jobs. Set
+      # BACKEND_RUN_JOBS=true (+ remove the worker) for a single-container deploy.
+      DFZ_RUN_JOBS: "${BACKEND_RUN_JOBS:-false}"
 
     volumes:
       - backend-secrets:/app/data
@@ -113,6 +112,56 @@ services:
         reservations:
           cpus: '0.5'
           memory: 1G
+
+  # ========================================
+  # Worker — leader-only background jobs (web+worker split)
+  # ========================================
+  # SAME image + config as the backend, but DFZ_RUN_JOBS=true: it runs the
+  # leader-only jobs (VM metrics scrape, alert engine, K8s watchers, snapshot
+  # builders, cleanup) so the API backend never competes with them for the event
+  # loop. Nothing routes here (Caddy → backend). --workers 1 keeps a single
+  # process holding the PG leader lock (extra workers would just contend).
+  worker:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${TAG:-latest}
+    pull_policy: always
+    container_name: dfz-worker
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "uvloop"]
+
+    environment:
+      <<: *app-env
+      DFZ_RUN_JOBS: "true"
+
+    volumes:
+      - backend-secrets:/app/data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - dfz-network
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '${WORKER_CPU_LIMIT:-1.5}'
+          memory: ${WORKER_MEM_LIMIT:-1536M}
+        reservations:
+          cpus: '0.25'
+          memory: 512M
 
   # ========================================
   # Terminal — stateful exec/SSH sessions (single-worker)
