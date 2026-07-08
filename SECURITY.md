@@ -22,7 +22,7 @@ Please include:
 
 ## Supported Versions
 
-Only the most recent release receives security fixes. Older versions (including images pinned via the `TAG` environment variable) may require an upgrade to receive patches.
+Only the most recent release receives security fixes. Older versions (including images pinned via `TAG` or the per-service `BACKEND_TAG` / `UI_TAG` / `TERMINAL_TAG` / `AGENT_TAG` / `GATEWAY_TAG` variables) may require an upgrade to receive patches. Components version independently — "most recent" applies per component.
 
 | Version | Supported |
 |---------|-----------|

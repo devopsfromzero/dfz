@@ -132,11 +132,28 @@ Only relevant when `USE_DISTRIBUTED_SINGLEFLIGHT=true` (the default). Most insta
 | `DIST_SF_POLL_INTERVAL_MS` | `100` | Waiter poll interval. Larger = less Redis load, more latency. Operators at scale often bump to 200-500. |
 | `DIST_SF_POLL_TIMEOUT` | `30` (s) | Max block time before a waiter falls back to a direct upstream call. |
 
+## Cluster agents & collection
+
+Clusters are managed by an agent running inside each cluster; it dials out to this
+stack over the `/agent-tunnel` websocket (via the Caddy edge) and the stack derives
+its analytics (risk, waste, topology, dashboard) from what the agent collects. The
+related knobs (all already defaulted in `docker-compose.yml`):
+
+| Variable | Default | Where | Notes |
+|----------|---------|-------|-------|
+| `DFZ_AGENT_SERVER_URL` | `${APP_URL}` | `x-app-env` | URL the add-cluster wizard bakes into agent manifests — agents dial this for heartbeat + tunnel. Must be reachable **from the clusters**; set `APP_URL` when not on localhost. |
+| `DFZ_AGENT_IMAGE` | `ghcr.io/devopsfromzero/dfz-agent:latest` | `x-app-env` | Agent image offered by the add-cluster wizard. Pin it (e.g. `:v0.6.0`) for reproducible cluster rollouts. |
+| `DFZ_GATEWAY_PROXY_URL` | `http://gateway:3092` | `x-app-env` + `terminal` | Internal gateway proxy the backend/terminal use to reach each agent's apiserver through its tunnel. Only change for a split deployment. |
+| `DFZ_COLLECTION_SYNC_INTERVAL` | `60` (s) | `x-app-env` | Cadence at which the worker pulls each agent's usage/events windows into PostgreSQL. Load-tuned floor: raise it on very large fleets; do **not** lower it. |
+| `DFZ_GATEWAY_DEV_INSECURE` | `0` | `gateway` | Escape hatch that skips agent-token validation against the backend. Lab-only; keep `0` in production. |
+| `BACKEND_RUN_JOBS` | `false` | `backend` | Set `true` (and remove the `worker` service) for a single-container deploy that runs background jobs in the API process. |
+| `DFZ_HEARTBEAT_INTERVAL` | `30` (s) | agent (in-cluster) | How often each agent reports home; the UI marks a tunnel agent stale after ~120 s without one. |
+
 ## Rolling back a bad release
 
 Something regressed after you upgraded images? Try in order:
 
-1. **Pin the previous tag.** Replace `:latest` with `:v<previous-release>` in each `image:` line of `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
+1. **Pin the previous tag.** Components version independently, so use the per-service tag variables, e.g. `BACKEND_TAG=v2.2.0 docker compose up -d` to roll back only the backend (each of `BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG` falls back to `TAG`, then `latest`).
 2. **Disable the suspected subsystem.** Add the relevant flag to the `backend` service's `environment:` block in `docker-compose.yml` (e.g. `- USE_INFORMER_CACHE=false`), then `docker compose up -d`. The backend falls back to direct K8s calls on every read — slower, but functional.
 3. **Drop cache state.** `docker compose restart redis` clears the cache without touching persistent data. (Postgres and `backend-secrets` volumes are preserved.)
 

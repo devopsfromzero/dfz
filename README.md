@@ -35,13 +35,18 @@ No external database or Redis needed — both ship in the compose file.
 
 | Service | Image | Port |
 |---|---|---|
-| UI | `ghcr.io/devopsfromzero/dfz-ui` | `${UI_PORT:-3080}` → 3000 |
-| Backend | `ghcr.io/devopsfromzero/dfz-backend` | internal 8000 |
+| Caddy edge | `caddy:2-alpine` | `${UI_PORT:-3080}` → 3080 (the ONLY published port) |
+| UI | `ghcr.io/devopsfromzero/dfz-ui` | internal 3000 |
+| Backend (API) | `ghcr.io/devopsfromzero/dfz-backend` | internal 8000 |
+| Worker (background jobs) | `ghcr.io/devopsfromzero/dfz-backend` | internal 8000 |
 | Terminal | `ghcr.io/devopsfromzero/dfz-terminal` | internal 8001 |
+| Gateway (agent tunnels) | `ghcr.io/devopsfromzero/dfz-gateway` | internal 3091/3092 |
 | PostgreSQL 16 | `postgres:16-alpine` | internal 5432 |
 | Redis 7 | `redis:7-alpine` | internal 6379 |
 
-Only the UI port is exposed to the host. All inter-service traffic stays on the internal `dfz-network` bridge.
+Only the Caddy edge port is exposed to the host; it serves the app and the `/agent-tunnel` websocket on the same port. All inter-service traffic stays on the internal `dfz-network` bridge.
+
+**Connecting clusters:** each Kubernetes cluster is managed by a small agent (`ghcr.io/devopsfromzero/dfz-agent`) running *inside* that cluster. The add-cluster wizard in the UI generates its manifest; the agent dials out to this stack over the `/agent-tunnel` websocket — no inbound access to your clusters is required.
 
 ## Configuration
 
@@ -51,10 +56,10 @@ Common overrides (search for the variable name in `docker-compose.yml`):
 
 | Variable | Where it lives | Purpose |
 |---|---|---|
-| `APP_URL` | `backend.environment` → `CORS_ALLOWED_ORIGINS` | External URL used by the browser (for CORS + cookies) |
-| `UI_PORT` | `ui.ports` | Host port mapped to the UI container |
-| `SECURE_COOKIES` | `backend` / `terminal` / `ui` environment blocks | Set to `true` when serving behind HTTPS |
-| Image `TAG` | Each service's `image:` line | Pin to a specific release (e.g. `:v0.1.0`) |
+| `APP_URL` | `x-app-env` → `CORS_ALLOWED_ORIGINS` / `DFZ_AGENT_SERVER_URL` | External URL used by the browser and dialed by cluster agents |
+| `UI_PORT` | `caddy.ports` | Host port of the Caddy edge |
+| `SECURE_COOKIES` | `x-app-env` + `terminal` / `ui` environment blocks | Set to `true` when serving behind HTTPS |
+| `BACKEND_TAG` / `UI_TAG` / `TERMINAL_TAG` / `AGENT_TAG` / `GATEWAY_TAG` | Each service's `image:` line | Pin a service to a specific release (components version independently; each falls back to `TAG`, then `latest`) |
 
 Rolling back a subsystem (Redis, informers, etc.) or tuning performance knobs? See [`docs/ADVANCED.md`](docs/ADVANCED.md).
 
@@ -65,18 +70,28 @@ docker compose pull
 docker compose up -d
 ```
 
-To pin a specific version, replace `:latest` in each `image:` line of `docker-compose.yml` with a versioned tag like `:v0.1.0`, then re-run the pull/up commands. Available tags at [ghcr.io/devopsfromzero](https://github.com/devopsfromzero?tab=packages).
+Components version independently. To pin a reproducible set, use the per-service tag variables (current releases shown):
+
+```bash
+BACKEND_TAG=v2.3.0 UI_TAG=v0.2.0 TERMINAL_TAG=v1.0.1 \
+AGENT_TAG=v0.6.0 GATEWAY_TAG=v0.1.0 docker compose up -d
+```
+
+Available tags at [ghcr.io/devopsfromzero](https://github.com/devopsfromzero?tab=packages).
 
 ## Troubleshooting
 
 **UI loads but can't log in / CORS error.**
-In `docker-compose.yml`, change the default `${APP_URL:-http://localhost:3080}` in the `backend` service's `CORS_ALLOWED_ORIGINS` line to the exact URL you use in the browser (protocol + host + port). Then `docker compose up -d` to apply.
+In `docker-compose.yml`, change the default `${APP_URL:-http://localhost:3080}` in the shared `x-app-env` block (`CORS_ALLOWED_ORIGINS`) to the exact URL you use in the browser (protocol + host + port). Then `docker compose up -d` to apply.
 
 **Cookies not persisting behind a reverse proxy.**
 Set `SECURE_COOKIES=true` in the `backend`, `terminal`, and `ui` environment blocks of `docker-compose.yml`. This requires HTTPS end-to-end.
 
 **Backend unhealthy after upgrade.**
 Check logs: `docker compose logs backend --tail 100`. If the schema migration failed, restart once more — migrations are idempotent.
+
+**Cluster shows Disconnected / agent can't connect.**
+The agent dials `APP_URL` + `/agent-tunnel` from *inside* the cluster, so that URL must be reachable from the cluster's nodes (not just your browser) — `localhost` won't work for a remote cluster. Check `docker compose logs caddy gateway --tail 50` for the incoming tunnel, and the agent pod's logs in the cluster for dial errors. Behind HTTPS the agent uses `wss://<host>/agent-tunnel` automatically.
 
 **Data lives in which volumes?**
 - `postgres-data` — all application state (users, cluster configs, settings)

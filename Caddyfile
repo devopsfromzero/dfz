@@ -1,0 +1,25 @@
+# DFZ single-door edge.
+#
+# Only this port is published to the host; UI, backend, terminal and gateway are
+# all internal to the docker network. The cluster agents' reverse tunnel (the one
+# websocket in the system) enters HERE and is proxied to the gateway — the
+# gateway is never exposed directly. Everything else is the normal app + its
+# /api/* HTTP+SSE proxy, served by the UI.
+#
+# For production HTTPS, replace ":3080" with your hostname (e.g. dfz.example.com)
+# and Caddy auto-provisions TLS; agents then dial wss://<host>/agent-tunnel.
+# Remember to also set SECURE_COOKIES=true in docker-compose.yml.
+:3080 {
+	# Agent reverse tunnel (websocket): /agent-tunnel -> gateway /connect.
+	# reverse_proxy transparently carries the WebSocket upgrade.
+	@agent path /agent-tunnel /agent-tunnel/*
+	handle @agent {
+		rewrite * /connect
+		reverse_proxy gateway:3091
+	}
+
+	# Everything else -> the UI (which proxies /api/* to the backend/terminal).
+	handle {
+		reverse_proxy ui:3000
+	}
+}

@@ -39,8 +39,8 @@ body:
   - type: input
     id: tag
     attributes:
-      label: DFZ image tag
-      description: Value of `TAG` in `docker-compose.yml`, or `latest` if unset.
+      label: DFZ image tags
+      description: Output of `docker compose images` (or the `TAG` / per-service `*_TAG` values you set; `latest` if unset).
       placeholder: "latest"
     validations:
       required: true

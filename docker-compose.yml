@@ -20,14 +20,29 @@
 #
 #   Common overrides (search for the variable name):
 #     APP_URL           External URL the dashboard is served at (CORS + cookies)
-#     UI_PORT           Host port mapping for the UI (container listens on 3000)
-#     TAG / REGISTRY    Pin to a specific image version (per service image: line)
+#     UI_PORT           Host port of the Caddy edge (the ONLY published port)
 #     SECURE_COOKIES    Set to true when serving over HTTPS
 #     COOKIE_SAMESITE   strict | lax | none (none requires SECURE_COOKIES=true)
 #     LOG_LEVEL         DEBUG | INFO | WARNING | ERROR
 #
+#   Image pinning: components version independently, so besides the global
+#   TAG there is a per-service override (each falls back to TAG, then latest):
+#     BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG
+#   Current released versions (2026-07):
+#     backend v2.3.0 · ui v0.2.0 · terminal v1.0.1 · agent v0.6.0 · gateway v0.1.0
+#   Example reproducible pin:
+#     BACKEND_TAG=v2.3.0 UI_TAG=v0.2.0 TERMINAL_TAG=v1.0.1 AGENT_TAG=v0.6.0 \
+#     GATEWAY_TAG=v0.1.0 docker compose up -d
+#
 #   Advanced knobs (feature flags, pool sizing, informer tuning,
 #   rollback playbook): docs/ADVANCED.md
+#
+# Topology (single published port):
+#   Browser ──http──▶ caddy :3080 ──▶ ui ──▶ backend / terminal
+#   Cluster agent ──websocket──▶ caddy /agent-tunnel ──▶ gateway (reverse tunnel)
+#   backend ──▶ gateway :3092 /proxy/<cluster> ──▶ (tunnel) ──▶ agent ──▶ apiserver
+#   Clusters are managed by an agent running INSIDE each cluster that dials OUT
+#   to this stack — no inbound access to your clusters is ever required.
 #
 # Security model:
 #   PostgreSQL uses trust auth on the internal Docker network only.
@@ -35,6 +50,8 @@
 #   (dfz_backend / dfz_terminal) enforces schema-level least-privilege.
 #   Override by adding PG_PASSWORD to the postgres service environment
 #   block below to enable password auth.
+#   The gateway (cluster-admin reach) is internal-only; agents enter via the
+#   Caddy edge and are token-validated against the backend before trust.
 #
 # Every backend feature flag defaults to ON in the image. To roll back
 # a specific subsystem (e.g. USE_REDIS_CACHE=false), add it to the
@@ -64,13 +81,61 @@ x-app-env: &app-env
   THREAD_POOL_MAX_WORKERS: "${THREAD_POOL_MAX_WORKERS:-64}"
   INFORMER_PROCESS_SOFT_LIMIT_MB: "${INFORMER_PROCESS_SOFT_LIMIT_MB:-1500}"
   INFORMER_PROCESS_HARD_LIMIT_MB: "${INFORMER_PROCESS_HARD_LIMIT_MB:-2000}"
+  # Cluster agents: image offered by the add-cluster wizard, the URL agents dial
+  # home to (heartbeat + tunnel; set APP_URL when not on localhost), and the
+  # internal gateway proxy the backend uses to reach each agent's apiserver.
+  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-ghcr.io/devopsfromzero/dfz-agent:latest}"
+  DFZ_AGENT_SERVER_URL: "${DFZ_AGENT_SERVER_URL:-${APP_URL:-http://localhost:3080}}"
+  DFZ_GATEWAY_PROXY_URL: "${DFZ_GATEWAY_PROXY_URL:-http://gateway:3092}"
+  # Collection cadence: the worker pulls each agent's usage/events windows into
+  # PostgreSQL on this interval (seconds). 60 is a load-tuned floor — raise it on
+  # very large fleets if needed; do not lower it.
+  DFZ_COLLECTION_SYNC_INTERVAL: "${DFZ_COLLECTION_SYNC_INTERVAL:-60}"
 
 services:
+  # ========================================
+  # Caddy — single-door edge (the ONLY published port)
+  # ========================================
+  # Routes /agent-tunnel (the cluster agents' reverse-tunnel websocket) to the
+  # gateway and everything else to the UI. UI/backend/terminal/gateway stay
+  # internal — the gateway (cluster-admin reach) is never exposed directly.
+  # For HTTPS, edit ./Caddyfile (replace :3080 with your hostname; Caddy
+  # auto-provisions TLS) and set SECURE_COOKIES=true.
+  caddy:
+    image: caddy:2-alpine
+    container_name: dfz-caddy
+    restart: unless-stopped
+
+    ports:
+      - "${UI_PORT:-3080}:3080"
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+    networks:
+      - dfz-network
+
+    depends_on:
+      ui:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+    # All browser HTTP + SSE + the agent tunnel funnel through this one edge.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+
   # ========================================
   # Backend — FastAPI (stateless, multi-worker)
   # ========================================
   backend:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${TAG:-latest}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-latest}}
     pull_policy: always
     container_name: dfz-backend
     restart: unless-stopped
@@ -102,7 +167,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # First boot runs schema migrations — give it room before health flapping.
+      start_period: 90s
 
     deploy:
       resources:
@@ -117,12 +183,12 @@ services:
   # Worker — leader-only background jobs (web+worker split)
   # ========================================
   # SAME image + config as the backend, but DFZ_RUN_JOBS=true: it runs the
-  # leader-only jobs (VM metrics scrape, alert engine, K8s watchers, snapshot
-  # builders, cleanup) so the API backend never competes with them for the event
-  # loop. Nothing routes here (Caddy → backend). --workers 1 keeps a single
-  # process holding the PG leader lock (extra workers would just contend).
+  # leader-only jobs (collection-sync, snapshot builders, alert engine, K8s
+  # watchers, VM metrics scrape, cleanup) so the API backend never competes with
+  # them for the event loop. Nothing routes here (Caddy → UI → backend).
+  # --workers 1 keeps a single process holding the PG leader lock.
   worker:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${TAG:-latest}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-latest}}
     pull_policy: always
     container_name: dfz-worker
     restart: unless-stopped
@@ -152,7 +218,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      # First boot runs schema migrations — give it room before health flapping.
+      start_period: 90s
 
     deploy:
       resources:
@@ -167,7 +234,7 @@ services:
   # Terminal — stateful exec/SSH sessions (single-worker)
   # ========================================
   terminal:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TAG:-latest}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-latest}}
     pull_policy: always
     container_name: dfz-terminal
     restart: unless-stopped
@@ -184,6 +251,9 @@ services:
       - PG_HOST=postgres
       - PG_PORT=5432
       - PG_DATABASE=dfz
+      # Reach the gateway's INTERNAL proxy port so terminal exec can drive
+      # agent clusters (terminal -> gateway -> tunnel -> agent -> apiserver).
+      - DFZ_GATEWAY_PROXY_URL=${DFZ_GATEWAY_PROXY_URL:-http://gateway:3092}
 
     volumes:
       - backend-secrets:/app/data:ro
@@ -214,10 +284,10 @@ services:
           memory: 256M
 
   # ========================================
-  # UI — Next.js frontend
+  # UI — Next.js frontend (internal; published via the Caddy edge)
   # ========================================
   ui:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${TAG:-latest}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-latest}}
     pull_policy: always
     container_name: dfz-ui
     restart: unless-stopped
@@ -230,8 +300,10 @@ services:
       - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       - SECURE_COOKIES=${SECURE_COOKIES:-false}
 
-    ports:
-      - "${UI_PORT:-3080}:3000"
+    # Internal only — the Caddy edge publishes the single host port (UI_PORT)
+    # and proxies here.
+    expose:
+      - "3000"
 
     networks:
       - dfz-network
@@ -353,6 +425,83 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # ========================================
+  # Gateway — reverse-tunnel terminator for cluster agents
+  # ========================================
+  # In-cluster agents dial OUT to this stack (no inbound access to your clusters).
+  # The agent tunnel enters via the Caddy edge (/agent-tunnel -> :3091 /connect);
+  # the backend reaches each agent's apiserver at http://gateway:3092/proxy/<id>/...
+  # (the INTERNAL proxy port). Never published on the host — only Caddy is.
+  gateway:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-gateway:${GATEWAY_TAG:-${TAG:-latest}}
+    pull_policy: always
+    container_name: dfz-gateway
+    restart: unless-stopped
+
+    environment:
+      - DFZ_GATEWAY_LISTEN=:3091           # agents dial /connect here (via Caddy)
+      - DFZ_GATEWAY_PROXY_LISTEN=:3092     # INTERNAL: hub /proxy — NOT published
+      # Validate each agent's token against the backend before trusting its tunnel.
+      - DFZ_VALIDATE_URL=${DFZ_GATEWAY_VALIDATE_URL:-http://backend:8000/api/k8s/agent/tunnel-auth}
+      - DFZ_GATEWAY_DEV_INSECURE=${DFZ_GATEWAY_DEV_INSECURE:-0}
+
+    # Internal only — :3091 (agent /connect) is reached via the Caddy edge
+    # (/agent-tunnel); :3092 (/proxy, cluster-admin) by the backend/terminal.
+    expose:
+      - "3091"
+      - "3092"
+
+    healthcheck:
+      test: ["CMD", "/dfz-gateway", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    networks:
+      - dfz-network
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ========================================
+  # Cluster agent — LAB helper, off by default.
+  # ========================================
+  # In a real deployment the agent runs INSIDE each target cluster (the add-cluster
+  # wizard gives you the manifest). This profile-gated service exists only for a
+  # quick lab against a cluster reachable from this host:
+  #   1. log in at :3080 → add cluster (Agent tab) → copy the token
+  #   2. DFZ_AGENT_TOKEN=<token> docker compose --profile agent up -d agent
+  agent:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-latest}}
+    pull_policy: always
+    container_name: dfz-agent-test
+    restart: unless-stopped
+    profiles: ["agent"]
+
+    environment:
+      - DFZ_SERVER_URL=${DFZ_AGENT_TEST_SERVER_URL:-http://backend:8000}
+      - DFZ_AGENT_TOKEN=${DFZ_AGENT_TOKEN:-}
+      - DFZ_CLUSTER_ID=${DFZ_AGENT_CLUSTER_ID:-}
+      - DFZ_HEARTBEAT_INTERVAL=${DFZ_HEARTBEAT_INTERVAL:-30}
+      - DFZ_GATEWAY_URL=${DFZ_AGENT_GATEWAY_URL:-ws://caddy:3080/agent-tunnel}
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    networks:
+      - dfz-network
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 networks:
   dfz-network:
