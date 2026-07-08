@@ -505,10 +505,12 @@ services:
 
 networks:
   dfz-network:
+    # No pinned subnet: Docker picks a free range. A hardcoded pool
+    # (previously 172.28.0.0/16) made a fresh install fail with "Pool
+    # overlaps with other one on this address space" on any host where
+    # that range was already taken (another compose project, a VPN route).
+    # Existing installs keep their already-created network unchanged.
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
 
 volumes:
   backend-secrets:
