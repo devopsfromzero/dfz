@@ -29,9 +29,9 @@
 #   TAG there is a per-service override (each falls back to TAG, then latest):
 #     BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG
 #   Current released versions (2026-07):
-#     backend v2.3.0 · ui v0.2.0 · terminal v1.0.1 · agent v0.6.0 · gateway v0.1.0
+#     backend v2.3.3 · ui v0.3.1 · terminal v1.0.1 · agent v0.6.1 · gateway v0.1.0
 #   Example reproducible pin:
-#     BACKEND_TAG=v2.3.0 UI_TAG=v0.2.0 TERMINAL_TAG=v1.0.1 AGENT_TAG=v0.6.0 \
+#     BACKEND_TAG=v2.3.3 UI_TAG=v0.3.1 TERMINAL_TAG=v1.0.1 AGENT_TAG=v0.6.1 \
 #     GATEWAY_TAG=v0.1.0 docker compose up -d
 #
 #   Advanced knobs (feature flags, pool sizing, informer tuning,
