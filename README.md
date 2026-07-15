@@ -73,7 +73,7 @@ docker compose up -d
 Components version independently. To pin a reproducible set, use the per-service tag variables (current releases shown):
 
 ```bash
-BACKEND_TAG=v2.4.0 UI_TAG=v0.4.0 TERMINAL_TAG=v1.1.0 \
+BACKEND_TAG=v2.4.1 UI_TAG=v0.4.0 TERMINAL_TAG=v1.1.0 \
 AGENT_TAG=v0.6.2 GATEWAY_TAG=v0.1.1 docker compose up -d
 ```
 
