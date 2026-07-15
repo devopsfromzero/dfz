@@ -29,10 +29,10 @@
 #   TAG there is a per-service override (each falls back to TAG, then latest):
 #     BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG
 #   Current released versions (2026-07):
-#     backend v2.3.3 · ui v0.3.1 · terminal v1.0.1 · agent v0.6.1 · gateway v0.1.0
+#     backend v2.4.0 · ui v0.4.0 · terminal v1.1.0 · agent v0.6.2 · gateway v0.1.1
 #   Example reproducible pin:
-#     BACKEND_TAG=v2.3.3 UI_TAG=v0.3.1 TERMINAL_TAG=v1.0.1 AGENT_TAG=v0.6.1 \
-#     GATEWAY_TAG=v0.1.0 docker compose up -d
+#     BACKEND_TAG=v2.4.0 UI_TAG=v0.4.0 TERMINAL_TAG=v1.1.0 AGENT_TAG=v0.6.2 \
+#     GATEWAY_TAG=v0.1.1 docker compose up -d
 #
 #   Advanced knobs (feature flags, pool sizing, informer tuning,
 #   rollback playbook): docs/ADVANCED.md
@@ -254,6 +254,9 @@ services:
       # Reach the gateway's INTERNAL proxy port so terminal exec can drive
       # agent clusters (terminal -> gateway -> tunnel -> agent -> apiserver).
       - DFZ_GATEWAY_PROXY_URL=${DFZ_GATEWAY_PROXY_URL:-http://gateway:3092}
+      # Delegate host SSH credential resolution to the main API (single vault
+      # owner) — terminal no longer decrypts vault credentials locally.
+      - BACKEND_URL=${BACKEND_URL:-http://backend:8000}
 
     volumes:
       - backend-secrets:/app/data:ro
