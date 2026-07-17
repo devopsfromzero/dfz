@@ -1,0 +1,79 @@
+# Validates the artifact this repo actually ships: the compose stack + edge config.
+#
+# This repo has no build — it IS the release bundle. So CI's job is to prove the
+# bundle is well-formed and still pinned, before anyone clones it. The checks
+# below are the automated half of CONTRIBUTING.md's review checklist; the "does
+# `up -d` actually work" half is a fresh-install smoke test (not yet automated).
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Compose + edge config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Catches YAML errors, bad interpolation, unknown keys, duplicate ports —
+      # i.e. a compose file that would fail on the user's very first command.
+      - name: docker compose config
+        run: docker compose -f docker-compose.yml config -q
+
+      # The Caddyfile is the single published door. A syntax error here means the
+      # whole stack is unreachable, and nothing else in this repo would catch it.
+      - name: Caddyfile validate
+        run: |
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      # Bundle invariant: every DFZ image default must be a released v-pin.
+      # A `:latest` default would silently make two clones of the same commit run
+      # different stacks — exactly what pinning exists to prevent.
+      # COMPOSE_PROFILES=agent so the profile-gated agent service is checked too.
+      - name: DFZ images are pinned to released versions
+        env:
+          COMPOSE_PROFILES: agent
+        run: |
+          set -euo pipefail
+
+          resolved=$(docker compose -f docker-compose.yml config --format json)
+
+          # Every DFZ image the bundle references: the service images, plus the
+          # agent image the add-cluster wizard hands to every managed cluster
+          # (an unpinned default there leaks `:latest` into user clusters).
+          mapfile -t refs < <(
+            {
+              echo "$resolved" | jq -r '.services[].image'
+              echo "$resolved" | jq -r '.services.backend.environment.DFZ_AGENT_IMAGE // empty'
+            } | grep 'devopsfromzero/dfz-' | sort -u
+          )
+
+          # Empty-scan guard: a check that finds nothing to check must fail, not
+          # pass silently. Without this, a change in `compose config` output shape
+          # (or a missing jq) turns this whole job into a green no-op.
+          if [ "${#refs[@]}" -eq 0 ]; then
+            echo "::error::Found no devopsfromzero/dfz-* image references. The check itself is broken — compose output shape changed?"
+            exit 1
+          fi
+
+          unpinned=()
+          for ref in "${refs[@]}"; do
+            if ! printf '%s' "$ref" | grep -Eq ':v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$'; then
+              unpinned+=("$ref")
+            fi
+          done
+
+          if [ "${#unpinned[@]}" -gt 0 ]; then
+            echo "::error::Unpinned DFZ image default(s) — each must pin a released v{version}:"
+            printf '  %s\n' "${unpinned[@]}"
+            exit 1
+          fi
+
+          echo "All ${#refs[@]} DFZ image references are pinned:"
+          printf '  %s\n' "${refs[@]}"
