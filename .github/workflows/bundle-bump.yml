@@ -1,0 +1,172 @@
+# Move the bundle's pins forward as releases land on ghcr.
+#
+# WHY THIS REPO DRIVES IT
+# The source repo is private, so its CI can't write here without a cross-repo
+# token to create, store and rotate. But ghcr is PUBLIC — this repo can simply
+# ask the registry what has shipped, and write to itself with the automatic
+# GITHUB_TOKEN. No secret exists to leak, and the bundle stays owned by the repo
+# that IS the bundle.
+#
+# WHY IT MATTERS
+# Pinning bought reproducibility and cost something: `:latest` used to carry new
+# releases to users on its own. Now a release whose pins never move is a release
+# nobody receives — silently. This closes that.
+#
+# WHY IT PUSHES INSTEAD OF OPENING A PR
+# This repo has auto-merge disabled and no branch protection, so a PR would either
+# sit there (the same drift wearing a costume) or merge instantly with no gate at
+# all. Validating BEFORE the commit is the honest version of the same guarantee.
+name: Bundle bump
+
+on:
+  schedule:
+    - cron: '25 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bundle-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Pin newly released versions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bump pins to the newest released versions
+        id: bump
+        run: |
+          set -euo pipefail
+
+          # module:TAG_VAR — the image is ghcr.io/devopsfromzero/dfz-<module>
+          MODULES="backend:BACKEND_TAG ui:UI_TAG terminal:TERMINAL_TAG agent:AGENT_TAG gateway:GATEWAY_TAG"
+          CHANGED=""
+
+          newest_released () {
+            # Strict full-line v<semver>: `latest`, `edge`, `sha-*` and the agent's
+            # `-cloud` variants must never be mistaken for a release. -V so v0.10.0
+            # sorts above v0.9.0, which a lexical sort gets backwards.
+            local image="$1" token tags
+            token=$(curl -fsS "https://ghcr.io/token?scope=repository:devopsfromzero/${image}:pull&service=ghcr.io" | jq -r '.token')
+            tags=$(curl -fsS -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/devopsfromzero/${image}/tags/list" | jq -r '.tags[]')
+            printf '%s\n' "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
+          }
+
+          for entry in $MODULES; do
+            module="${entry%%:*}"; var="${entry##*:}"
+
+            # head -1: backend appears twice (the API and the worker share one
+            # image). Without it `current` is two lines, never equals `newest`,
+            # and every run would "bump" to the same version, then die on an
+            # empty commit — an hourly red CI that changes nothing.
+            current=$(grep -oE "dfz-${module}:\\\$\\{${var}:-\\\$\\{TAG:-v[0-9]+\.[0-9]+\.[0-9]+" docker-compose.yml \
+                      | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+            if [ -z "$current" ]; then
+              echo "::error::No pin found for ${module} in docker-compose.yml — the pin format changed, or pinning was reverted."
+              exit 1
+            fi
+
+            newest=$(newest_released "dfz-${module}")
+            if [ -z "$newest" ]; then
+              echo "::error::ghcr returned no released v-tag for dfz-${module}. Refusing to guess."
+              exit 1
+            fi
+
+            if [ "$current" = "$newest" ]; then
+              echo "  ${module}: ${current} (current)"
+              continue
+            fi
+
+            # Forward only. A pin must never walk backwards because a tag was
+            # deleted or the registry answered oddly.
+            if [ "$(printf '%s\n%s\n' "$current" "$newest" | sort -V | tail -1)" != "$newest" ]; then
+              echo "::warning::${module}: ghcr's newest (${newest}) is older than the pin (${current}) — leaving it alone."
+              continue
+            fi
+
+            echo "  ${module}: ${current} -> ${newest}  BUMP"
+            sed -i -E "/dfz-${module}:/ s/(TAG:-)v[0-9]+\.[0-9]+\.[0-9]+(\}\})/\1${newest}\2/" docker-compose.yml
+            if [ "$module" = "agent" ]; then
+              # The wizard hands this image to every managed cluster; leaving it
+              # behind would pin user clusters to an old agent.
+              sed -i -E "/DFZ_AGENT_IMAGE:/ s|(dfz-agent:)v[0-9]+\.[0-9]+\.[0-9]+|\1${newest}|" docker-compose.yml
+            fi
+            CHANGED="${CHANGED}- ${module} \`${newest}\`"$'\n'
+          done
+
+          if [ -z "$CHANGED" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Bundle already pins every released version."
+            exit 0
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          printf '%s' "$CHANGED" > /tmp/changed.md
+          echo "--- bumping ---"; cat /tmp/changed.md
+
+      # Validate BEFORE writing history: a broken bundle on main is what users clone.
+      - name: Validate the bumped bundle
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          COMPOSE_PROFILES: agent
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml config -q
+
+          resolved=$(docker compose -f docker-compose.yml config --format json)
+          mapfile -t refs < <(
+            {
+              echo "$resolved" | jq -r '.services[].image'
+              echo "$resolved" | jq -r '.services.backend.environment.DFZ_AGENT_IMAGE // empty'
+            } | grep 'devopsfromzero/dfz-' | sort -u
+          )
+          [ "${#refs[@]}" -gt 0 ] || { echo "::error::No DFZ images resolved — check is broken."; exit 1; }
+          for ref in "${refs[@]}"; do
+            printf '%s' "$ref" | grep -Eq ':v[0-9]+\.[0-9]+\.[0-9]+$' \
+              || { echo "::error::Bump produced an unpinned ref: $ref"; exit 1; }
+          done
+
+          # Every pinned tag must actually be pullable — a pin to a tag that does
+          # not exist would break `up -d` for everyone.
+          for ref in "${refs[@]}"; do
+            docker manifest inspect "$ref" >/dev/null 2>&1 \
+              || { echo "::error::Pinned image is not pullable: $ref"; exit 1; }
+            echo "  pullable: $ref"
+          done
+
+      - name: Record and push
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          today=$(date -u +%F)
+
+          {
+            printf '\n## %s\n\n' "$today"
+            cat /tmp/changed.md
+          } > /tmp/entry.md
+
+          python3 - <<'PY'
+          from pathlib import Path
+          marker = "<!-- new-entries-below -->"
+          changelog = Path("CHANGELOG.md")
+          text = changelog.read_text(encoding="utf-8")
+          entry = Path("/tmp/entry.md").read_text(encoding="utf-8")
+          if marker not in text:
+              raise SystemExit(f"::error::{marker} missing from CHANGELOG.md — cannot place the entry safely.")
+          changelog.write_text(text.replace(marker, marker + "\n" + entry.rstrip() + "\n", 1), encoding="utf-8")
+          PY
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docker-compose.yml CHANGELOG.md
+
+          summary=$(sed -E 's/^- //; s/`//g' /tmp/changed.md | paste -sd ', ' -)
+          git commit -m "chore(bundle): pin ${summary}" -m \
+            "Released on ghcr and validated here: compose config, pin invariant, and every pinned tag confirmed pullable."
+          git push origin HEAD:main
+          echo "Pushed: ${summary}"
