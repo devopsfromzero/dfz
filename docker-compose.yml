@@ -200,6 +200,12 @@ services:
     environment:
       <<: *app-env
       DFZ_RUN_JOBS: "true"
+      # Which background-job groups this worker runs. Default "all" = one worker
+      # runs everything (unchanged). To offload host/uptime monitoring onto the
+      # dedicated worker-monitoring container below, set this to "core" AND start
+      # the monitoring profile. Splitting is all-or-nothing: "all" + a monitoring
+      # worker double-runs the scrape. See docs/multi-os-monitoring/PLAN.md (A5).
+      DFZ_JOB_GROUPS: "${WORKER_JOB_GROUPS:-all}"
 
     volumes:
       - backend-secrets:/app/data
@@ -232,6 +238,65 @@ services:
         reservations:
           cpus: '0.25'
           memory: 512M
+
+  # ========================================
+  # Worker-monitoring — dedicated host/uptime scrape worker (profile-gated)
+  # ========================================
+  # Runtime isolation for infrastructure monitoring (multi-OS VM metrics over
+  # SSH/WinRM + uptime checks). SAME image as backend/worker — no separate
+  # codebase; the split is process-type only (own GIL, event loop, cgroup) so a
+  # 300-500 host SSH/WinRM fleet cannot stall K8s watchers or the alert engine.
+  #
+  # Enable it:  WORKER_JOB_GROUPS=core docker compose --profile monitoring up -d
+  #   (sets the main worker to "core" so the two do not both run the scrape).
+  # It takes a distinct PG advisory leader lock (base+2), so it leads its own
+  # group independently of the core worker.
+  worker-monitoring:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.4.3}}
+    pull_policy: always
+    container_name: dfz-worker-monitoring
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "uvloop"]
+
+    environment:
+      <<: *app-env
+      DFZ_RUN_JOBS: "true"
+      DFZ_JOB_GROUPS: "monitoring"
+      # SSH connection ceiling for the scrape fleet — this worker owns its own
+      # budget (separate process from the API/core worker). Raise for large fleets.
+      DFZ_SSH_MAX_CONCURRENT: "${MONITORING_SSH_MAX_CONCURRENT:-30}"
+
+    volumes:
+      - backend-secrets:/app/data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - dfz-network
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '${MONITORING_CPU_LIMIT:-1.5}'
+          memory: ${MONITORING_MEM_LIMIT:-1024M}
+        reservations:
+          cpus: '0.25'
+          memory: 384M
 
   # ========================================
   # Terminal — stateful exec/SSH sessions (single-worker)
