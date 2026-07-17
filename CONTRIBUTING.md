@@ -23,7 +23,7 @@ Use the **Bug report** issue template. Include:
   docker compose logs ui --tail 100
   ```
 - Your `docker --version` and `docker compose version`
-- The image tag you're running (`TAG` in `docker-compose.yml`, or `latest`)
+- The image versions you're running: `docker compose config | grep image:`
 
 ## Submitting changes
 

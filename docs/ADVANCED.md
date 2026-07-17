@@ -142,7 +142,7 @@ related knobs (all already defaulted in `docker-compose.yml`):
 | Variable | Default | Where | Notes |
 |----------|---------|-------|-------|
 | `DFZ_AGENT_SERVER_URL` | `${APP_URL}` | `x-app-env` | URL the add-cluster wizard bakes into agent manifests — agents dial this for heartbeat + tunnel. Must be reachable **from the clusters**; set `APP_URL` when not on localhost. |
-| `DFZ_AGENT_IMAGE` | `ghcr.io/devopsfromzero/dfz-agent:latest` | `x-app-env` | Agent image offered by the add-cluster wizard. Pin it (e.g. `:v0.6.0`) for reproducible cluster rollouts. |
+| `DFZ_AGENT_IMAGE` | the agent version this bundle pins (see `x-app-env` in `docker-compose.yml`) | `x-app-env` | Agent image the add-cluster wizard hands to each managed cluster. Pinned by default, so cluster rollouts are reproducible; override it to move a fleet independently of the bundle. |
 | `DFZ_GATEWAY_PROXY_URL` | `http://gateway:3092` | `x-app-env` + `terminal` | Internal gateway proxy the backend/terminal use to reach each agent's apiserver through its tunnel. Only change for a split deployment. |
 | `DFZ_COLLECTION_SYNC_INTERVAL` | `60` (s) | `x-app-env` | Cadence at which the worker pulls each agent's usage/events windows into PostgreSQL. Load-tuned floor: raise it on very large fleets; do **not** lower it. |
 | `DFZ_GATEWAY_DEV_INSECURE` | `0` | `gateway` | Escape hatch that skips agent-token validation against the backend. Lab-only; keep `0` in production. |
@@ -153,8 +153,9 @@ related knobs (all already defaulted in `docker-compose.yml`):
 
 Something regressed after you upgraded images? Try in order:
 
-1. **Pin the previous tag.** Components version independently, so use the per-service tag variables, e.g. `BACKEND_TAG=v2.2.0 docker compose up -d` to roll back only the backend (each of `BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG` falls back to `TAG`, then `latest`).
-2. **Disable the suspected subsystem.** Add the relevant flag to the `backend` service's `environment:` block in `docker-compose.yml` (e.g. `- USE_INFORMER_CACHE=false`), then `docker compose up -d`. The backend falls back to direct K8s calls on every read — slower, but functional.
-3. **Drop cache state.** `docker compose restart redis` clears the cache without touching persistent data. (Postgres and `backend-secrets` volumes are preserved.)
+1. **Roll the whole bundle back.** Every commit of this repo pins an image set that was tested together, so `git checkout <earlier-commit> && docker compose up -d` puts you back on that exact stack — compose file, edge config and pins included. `git log --oneline -- docker-compose.yml` lists the commits where the pins moved.
+2. **Roll back a single component.** Components version independently, so use its per-service tag variable, e.g. `BACKEND_TAG=v2.4.1 docker compose up -d` to move only the backend (each of `BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG` falls back to `TAG`, then to the version this bundle pins).
+3. **Disable the suspected subsystem.** Add the relevant flag to the `backend` service's `environment:` block in `docker-compose.yml` (e.g. `- USE_INFORMER_CACHE=false`), then `docker compose up -d`. The backend falls back to direct K8s calls on every read — slower, but functional.
+4. **Drop cache state.** `docker compose restart redis` clears the cache without touching persistent data. (Postgres and `backend-secrets` volumes are preserved.)
 
 If none of that helps, open a bug report with `docker compose logs backend --tail 500`.

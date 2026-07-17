@@ -59,23 +59,25 @@ Common overrides (search for the variable name in `docker-compose.yml`):
 | `APP_URL` | `x-app-env` → `CORS_ALLOWED_ORIGINS` / `DFZ_AGENT_SERVER_URL` | External URL used by the browser and dialed by cluster agents |
 | `UI_PORT` | `caddy.ports` | Host port of the Caddy edge |
 | `SECURE_COOKIES` | `x-app-env` + `terminal` / `ui` environment blocks | Set to `true` when serving behind HTTPS |
-| `BACKEND_TAG` / `UI_TAG` / `TERMINAL_TAG` / `AGENT_TAG` / `GATEWAY_TAG` | Each service's `image:` line | Pin a service to a specific release (components version independently; each falls back to `TAG`, then `latest`) |
+| `BACKEND_TAG` / `UI_TAG` / `TERMINAL_TAG` / `AGENT_TAG` / `GATEWAY_TAG` | Each service's `image:` line | Override a service's version (components version independently; each falls back to `TAG`, then to the tested default this commit pins) |
 
 Rolling back a subsystem (Redis, informers, etc.) or tuning performance knobs? See [`docs/ADVANCED.md`](docs/ADVANCED.md).
 
 ## Upgrading
 
 ```bash
+git pull
 docker compose pull
 docker compose up -d
 ```
 
-Components version independently. To pin a reproducible set, use the per-service tag variables (current releases shown):
+Each service's `image:` line in `docker-compose.yml` pins the version this commit was tested with, so any clone of a given commit runs exactly the same stack. `git pull` moves you to the next released set — the compose file, the edge config and the pins travel together. To see what you're currently pinned to:
 
 ```bash
-BACKEND_TAG=v2.4.3 UI_TAG=v0.4.3 TERMINAL_TAG=v1.1.0 \
-AGENT_TAG=v0.6.2 GATEWAY_TAG=v0.1.1 docker compose up -d
+docker compose config | grep image:
 ```
+
+Want the bleeding edge instead of the tested set? `TAG=latest docker compose up -d`. Need a single component on a different version? Use its override (`BACKEND_TAG`, `UI_TAG`, `TERMINAL_TAG`, `AGENT_TAG`, `GATEWAY_TAG`) — each falls back to `TAG`, then to the pinned default.
 
 Available tags at [ghcr.io/devopsfromzero](https://github.com/devopsfromzero?tab=packages).
 

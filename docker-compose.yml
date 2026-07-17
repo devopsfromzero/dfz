@@ -25,14 +25,17 @@
 #     COOKIE_SAMESITE   strict | lax | none (none requires SECURE_COOKIES=true)
 #     LOG_LEVEL         DEBUG | INFO | WARNING | ERROR
 #
-#   Image pinning: components version independently, so besides the global
-#   TAG there is a per-service override (each falls back to TAG, then latest):
+#   Image pinning: each service's `image:` line pins the released version this
+#   commit was tested with. Components version independently, so the pins live
+#   per-service rather than under one global tag — and the pins themselves ARE
+#   the release record: any clone of this commit runs exactly the same stack.
+#   `git pull` moves you to the next released set (compose + edge config + pins
+#   travel together). Deliberately NOT restated in prose anywhere — read the
+#   `image:` lines, or `docker compose config | grep image:`.
+#
+#   Overrides (each falls back to TAG, then to the pinned default):
 #     BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG
-#   Current released versions (2026-07):
-#     backend v2.4.3 · ui v0.4.3 · terminal v1.1.0 · agent v0.6.2 · gateway v0.1.1
-#   Example reproducible pin:
-#     BACKEND_TAG=v2.4.3 UI_TAG=v0.4.3 TERMINAL_TAG=v1.1.0 AGENT_TAG=v0.6.2 \
-#     GATEWAY_TAG=v0.1.1 docker compose up -d
+#   Bleeding edge instead of the tested set:  TAG=latest docker compose up -d
 #
 #   Advanced knobs (feature flags, pool sizing, informer tuning,
 #   rollback playbook): docs/ADVANCED.md
@@ -84,7 +87,7 @@ x-app-env: &app-env
   # Cluster agents: image offered by the add-cluster wizard, the URL agents dial
   # home to (heartbeat + tunnel; set APP_URL when not on localhost), and the
   # internal gateway proxy the backend uses to reach each agent's apiserver.
-  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-ghcr.io/devopsfromzero/dfz-agent:latest}"
+  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-ghcr.io/devopsfromzero/dfz-agent:v0.6.2}"
   DFZ_AGENT_SERVER_URL: "${DFZ_AGENT_SERVER_URL:-${APP_URL:-http://localhost:3080}}"
   DFZ_GATEWAY_PROXY_URL: "${DFZ_GATEWAY_PROXY_URL:-http://gateway:3092}"
   # Collection cadence: the worker pulls each agent's usage/events windows into
@@ -135,7 +138,7 @@ services:
   # Backend — FastAPI (stateless, multi-worker)
   # ========================================
   backend:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-latest}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.4.3}}
     pull_policy: always
     container_name: dfz-backend
     restart: unless-stopped
@@ -188,7 +191,7 @@ services:
   # them for the event loop. Nothing routes here (Caddy → UI → backend).
   # --workers 1 keeps a single process holding the PG leader lock.
   worker:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-latest}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.4.3}}
     pull_policy: always
     container_name: dfz-worker
     restart: unless-stopped
@@ -234,7 +237,7 @@ services:
   # Terminal — stateful exec/SSH sessions (single-worker)
   # ========================================
   terminal:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-latest}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-v1.1.0}}
     pull_policy: always
     container_name: dfz-terminal
     restart: unless-stopped
@@ -290,7 +293,7 @@ services:
   # UI — Next.js frontend (internal; published via the Caddy edge)
   # ========================================
   ui:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-latest}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-v0.4.3}}
     pull_policy: always
     container_name: dfz-ui
     restart: unless-stopped
@@ -437,7 +440,7 @@ services:
   # the backend reaches each agent's apiserver at http://gateway:3092/proxy/<id>/...
   # (the INTERNAL proxy port). Never published on the host — only Caddy is.
   gateway:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-gateway:${GATEWAY_TAG:-${TAG:-latest}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-gateway:${GATEWAY_TAG:-${TAG:-v0.1.1}}
     pull_policy: always
     container_name: dfz-gateway
     restart: unless-stopped
@@ -480,7 +483,7 @@ services:
   #   1. log in at :3080 → add cluster (Agent tab) → copy the token
   #   2. DFZ_AGENT_TOKEN=<token> docker compose --profile agent up -d agent
   agent:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-latest}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.6.2}}
     pull_policy: always
     container_name: dfz-agent-test
     restart: unless-stopped
