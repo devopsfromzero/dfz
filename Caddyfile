@@ -18,6 +18,21 @@
 		reverse_proxy gateway:3091
 	}
 
+	# Service-proxy expose (Rancher-style): /expose/* -> backend directly, BYPASSING
+	# the UI's /api/* proxy. The backend authenticates the DFZ session cookie, checks
+	# RBAC, then streams the request through the agent to the target cluster's apiserver
+	# service/pod proxy subresource. Kept same-origin so the httpOnly session cookie is
+	# sent automatically when a user opens an exposed app in a new tab. reverse_proxy
+	# transparently carries any WebSocket upgrade the exposed app negotiates.
+	handle /expose/* {
+		# Rewrite Host to the upstream so the backend's TrustedHostMiddleware accepts
+		# it (same as the UI's /api proxy path). The real client Host is preserved in
+		# the X-Forwarded-Host header Caddy adds automatically.
+		reverse_proxy backend:8000 {
+			header_up Host {upstream_hostport}
+		}
+	}
+
 	# Everything else -> the UI (which proxies /api/* to the backend/terminal).
 	handle {
 		reverse_proxy ui:3000
