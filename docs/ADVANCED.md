@@ -149,6 +149,53 @@ related knobs (all already defaulted in `docker-compose.yml`):
 | `BACKEND_RUN_JOBS` | `false` | `backend` | Set `true` (and remove the `worker` service) for a single-container deploy that runs background jobs in the API process. |
 | `DFZ_HEARTBEAT_INTERVAL` | `30` (s) | agent (in-cluster) | How often each agent reports home; the UI marks a tunnel agent stale after ~120 s without one. |
 
+## Windows host monitoring (WinRM)
+
+VM monitoring collects Windows hosts agentlessly over WinRM (default port 5985). Authentication is Negotiate: **Kerberos** for domain-joined hosts, **NTLM** for workgroup hosts or hosts added by IP address.
+
+### Adding a domain host
+
+For Kerberos to engage, all three of these must hold — otherwise Negotiate silently falls back to NTLM, which fails on NTLM-hardened domains:
+
+| Requirement | Detail |
+|-------------|--------|
+| Host added by **FQDN** | `srv01.corp.example`, not an IP — Kerberos tickets are issued per service FQDN. |
+| Username as **UPN** | `svc-monitor@corp.example`. Realm casing is normalized automatically. |
+| Backend can resolve **AD DNS** | KDC discovery uses DNS SRV records. Point the `backend` service's `dns:` at a domain controller (see the commented example on the `backend` service in `docker-compose.yml`), **or** mount your own `krb5.conf` and set `KRB5_CONFIG` on the backend service. |
+
+Verified against a domain with incoming NTLM fully disabled (`Network security: Restrict NTLM: Deny all`) — the connection authenticates with Kerberos end to end.
+
+### Least-privilege monitoring account
+
+A domain monitoring account does **not** need local Administrator. The verified minimal set on each monitored host:
+
+| Grant | Where | Why |
+|-------|-------|-----|
+| Member of `Remote Management Users` | Local group on the host | Allows the WinRM connection itself. |
+| `Enable Account` + `Remote Enable` | WMI ACL on the `root/cimv2` namespace (apply to subnamespaces) | The collector reads CIM classes (`Win32_OperatingSystem`, `Win32_PerfRawData_*`, `Win32_LogicalDisk`, …). A WinRM session is a network logon, and the default WMI ACL lacks `Remote Enable` for non-admins — this is the bit that unblocks it. |
+
+Explicitly **not** required (verified by removing them): local `Administrators`, `Performance Monitor Users`, `Distributed COM Users`.
+
+Grant the WMI ACL once per host as an administrator (replace the account):
+
+```powershell
+$sid = (New-Object System.Security.Principal.NTAccount('CORP\svc-monitor')).Translate([System.Security.Principal.SecurityIdentifier]).Value
+$inv = @{Namespace='root/cimv2'; Path='__systemsecurity=@'}
+$sd  = (Invoke-WmiMethod @inv -Name GetSecurityDescriptor).Descriptor
+$ace = (New-Object System.Management.ManagementClass('win32_Ace')).CreateInstance()
+$ace.AccessMask = 0x21   # Enable Account (0x1) + Remote Enable (0x20)
+$ace.AceFlags   = 0x2    # inherit to subnamespaces
+$ace.AceType    = 0x0
+$tr  = (New-Object System.Management.ManagementClass('win32_Trustee')).CreateInstance()
+$tr.SidString = $sid
+$ace.Trustee  = $tr
+$sd.DACL += $ace.PSObject.ImmediateBaseObject
+(Invoke-WmiMethod @inv -Name SetSecurityDescriptor -ArgumentList $sd.PSObject.ImmediateBaseObject).ReturnValue  # 0 = success
+net localgroup "Remote Management Users" "CORP\svc-monitor" /add
+```
+
+The **Restart** host action is the one exception: it runs `shutdown /r`, which the least-privilege set does not allow. Use an admin account for that host, or grant the account shutdown rights, if you need restarts from the console.
+
 ## Rolling back a bad release
 
 Something regressed after you upgraded images? Try in order:
