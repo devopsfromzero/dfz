@@ -161,7 +161,7 @@ For Kerberos to engage, all three of these must hold — otherwise Negotiate sil
 |-------------|--------|
 | Host added by **FQDN** | `srv01.corp.example`, not an IP — Kerberos tickets are issued per service FQDN. |
 | Username as **UPN** | `svc-monitor@corp.example`. Realm casing is normalized automatically. |
-| Backend can resolve **AD DNS** | KDC discovery uses DNS SRV records. Point the `backend` service's `dns:` at a domain controller (see the commented example on the `backend` service in `docker-compose.yml`), **or** mount your own `krb5.conf` and set `KRB5_CONFIG` on the backend service. |
+| Backend can resolve **AD DNS** | KDC discovery uses DNS SRV records. Give the `backend` **and** `worker` services a `dns:` entry pointing at a domain controller — put it in a local `docker-compose.override.yml` (auto-loaded by compose) rather than editing the bundle, e.g. `services: { backend: { dns: [10.0.0.10] }, worker: { dns: [10.0.0.10] } }`. **Or** mount your own `krb5.conf` and set `KRB5_CONFIG` on both services. |
 
 Verified against a domain with incoming NTLM fully disabled (`Network security: Restrict NTLM: Deny all`) — the connection authenticates with Kerberos end to end.
 
