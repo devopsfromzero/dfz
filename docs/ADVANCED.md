@@ -173,6 +173,7 @@ A domain monitoring account does **not** need local Administrator. The verified 
 |-------|-------|-----|
 | Member of `Remote Management Users` | Local group on the host | Allows the WinRM connection itself. |
 | `Enable Account` + `Remote Enable` | WMI ACL on the `root/cimv2` namespace (apply to subnamespaces) | The collector reads CIM classes (`Win32_OperatingSystem`, `Win32_PerfRawData_*`, `Win32_LogicalDisk`, …). A WinRM session is a network logon, and the default WMI ACL lacks `Remote Enable` for non-admins — this is the bit that unblocks it. |
+| Member of `Performance Log Users` | Local group on the host | Without it the `Win32_PerfRawData_*` performance classes return **empty result sets** to a non-admin — no error, just zero rows — so CPU, network and disk-I/O rates silently stay blank while memory/disk/system info keep working. |
 
 Explicitly **not** required (verified by removing them): local `Administrators`, `Performance Monitor Users`, `Distributed COM Users`.
 
@@ -192,6 +193,7 @@ $ace.Trustee  = $tr
 $sd.DACL += $ace.PSObject.ImmediateBaseObject
 (Invoke-WmiMethod @inv -Name SetSecurityDescriptor -ArgumentList $sd.PSObject.ImmediateBaseObject).ReturnValue  # 0 = success
 net localgroup "Remote Management Users" "CORP\svc-monitor" /add
+net localgroup "Performance Log Users" "CORP\svc-monitor" /add
 ```
 
 The **Restart** host action is the one exception: it runs `shutdown /r`, which the least-privilege set does not allow. Use an admin account for that host, or grant the account shutdown rights, if you need restarts from the console.
