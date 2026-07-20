@@ -166,9 +166,11 @@ services:
 
     volumes:
       - backend-secrets:/app/data
-      # Local clusters: kubeconfig dir (read-only — the hub only enumerates
-      # context names; credentials are used by the local-agent) + shared token.
-      - ${KUBECONFIG_DIR:-./kubeconfig}:/kubeconfig:ro
+      # Local clusters: kubeconfig dir. Writable on the BACKEND only — it is
+      # the single writer: an On-Premises kubeconfig upload in the UI is merged
+      # into ./kubeconfig/config and served by the local-agent. The worker and
+      # the local-agent mount the same dir read-only.
+      - ${KUBECONFIG_DIR:-./kubeconfig}:/kubeconfig
       - local-agent-secret:/secret:ro
 
     depends_on:
