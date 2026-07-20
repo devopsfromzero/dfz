@@ -91,7 +91,7 @@ x-app-env: &app-env
   # Cluster agents: image offered by the add-cluster wizard, the URL agents dial
   # home to (heartbeat + tunnel; set APP_URL when not on localhost), and the
   # internal gateway proxy the backend uses to reach each agent's apiserver.
-  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-ghcr.io/devopsfromzero/dfz-agent:v0.6.2}"
+  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-ghcr.io/devopsfromzero/dfz-agent:v0.6.3}"
   DFZ_AGENT_SERVER_URL: "${DFZ_AGENT_SERVER_URL:-${APP_URL:-http://localhost:3080}}"
   DFZ_GATEWAY_PROXY_URL: "${DFZ_GATEWAY_PROXY_URL:-http://gateway:3092}"
   # Collection cadence: the worker pulls each agent's usage/events windows into
@@ -152,7 +152,7 @@ services:
   # Backend — FastAPI (stateless, multi-worker)
   # ========================================
   backend:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.5.5}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.5.6}}
     pull_policy: always
     container_name: dfz-backend
     restart: unless-stopped
@@ -213,7 +213,7 @@ services:
   # them for the event loop. Nothing routes here (Caddy → UI → backend).
   # --workers 1 keeps a single process holding the PG leader lock.
   worker:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.5.5}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.5.6}}
     pull_policy: always
     container_name: dfz-worker
     restart: unless-stopped
@@ -280,7 +280,7 @@ services:
   # It takes a distinct PG advisory leader lock (base+2), so it leads its own
   # group independently of the core worker.
   worker-monitoring:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.5.5}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.5.6}}
     pull_policy: always
     container_name: dfz-worker-monitoring
     restart: unless-stopped
@@ -386,7 +386,7 @@ services:
   # UI — Next.js frontend (internal; published via the Caddy edge)
   # ========================================
   ui:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-v0.5.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-v0.5.3}}
     pull_policy: always
     container_name: dfz-ui
     restart: unless-stopped
@@ -587,7 +587,7 @@ services:
   # For a cluster on THIS host whose kubeconfig says 127.0.0.1 (kind, minikube),
   # point the kubeconfig server at host.docker.internal instead.
   local-agent:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.6.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.6.3}}
     pull_policy: always
     container_name: dfz-local-agent
     restart: unless-stopped
@@ -662,7 +662,7 @@ services:
   #   1. log in at :3080 → add cluster (Agent tab) → copy the token
   #   2. DFZ_AGENT_TOKEN=<token> docker compose --profile agent up -d agent
   agent:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.6.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.6.3}}
     pull_policy: always
     container_name: dfz-agent-test
     restart: unless-stopped
