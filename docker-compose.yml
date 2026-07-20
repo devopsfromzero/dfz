@@ -44,8 +44,12 @@
 #   Browser ──http──▶ caddy :3080 ──▶ ui ──▶ backend / terminal
 #   Cluster agent ──websocket──▶ caddy /agent-tunnel ──▶ gateway (reverse tunnel)
 #   backend ──▶ gateway :3092 /proxy/<cluster> ──▶ (tunnel) ──▶ agent ──▶ apiserver
+#   backend ──▶ local-agent :8080 /c/<context> ──▶ apiserver     (kubeconfig mode)
 #   Clusters are managed by an agent running INSIDE each cluster that dials OUT
 #   to this stack — no inbound access to your clusters is ever required.
+#   For clusters your kubeconfig can already reach, the bundled local-agent
+#   serves them without any in-cluster install: put the kubeconfig file at
+#   ./kubeconfig/config and restart the worker — the clusters appear.
 #
 # Security model:
 #   PostgreSQL uses trust auth on the internal Docker network only.
@@ -94,6 +98,16 @@ x-app-env: &app-env
   # PostgreSQL on this interval (seconds). 60 is a load-tuned floor — raise it on
   # very large fleets if needed; do not lower it.
   DFZ_COLLECTION_SYNC_INTERVAL: "${DFZ_COLLECTION_SYNC_INTERVAL:-60}"
+  # Bundled local agent (kubeconfig mode): at startup the worker reads the
+  # kubeconfig mounted at this path (host: ./kubeconfig/config) and registers one
+  # direct-mode cluster per context, each served by the local-agent service at
+  # /c/{context}. No file present → complete no-op; in-cluster agents unaffected.
+  # The shared token is generated once by token-init; set DFZ_LOCAL_AGENT_TOKEN
+  # only to pin your own.
+  DFZ_LOCAL_KUBECONFIG: "/kubeconfig/config"
+  DFZ_LOCAL_AGENT_URL: "http://local-agent:8080"
+  DFZ_LOCAL_AGENT_TOKEN: "${DFZ_LOCAL_AGENT_TOKEN:-}"
+  DFZ_LOCAL_AGENT_TOKEN_FILE: "/secret/token"
 
 services:
   # ========================================
@@ -152,12 +166,18 @@ services:
 
     volumes:
       - backend-secrets:/app/data
+      # Local clusters: kubeconfig dir (read-only — the hub only enumerates
+      # context names; credentials are used by the local-agent) + shared token.
+      - ${KUBECONFIG_DIR:-./kubeconfig}:/kubeconfig:ro
+      - local-agent-secret:/secret:ro
 
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      token-init:
+        condition: service_completed_successfully
 
     networks:
       - dfz-network
@@ -209,12 +229,18 @@ services:
 
     volumes:
       - backend-secrets:/app/data
+      # The worker runs the local-kubeconfig reconciler + K8s watchers, so it
+      # needs the SAME read-only kubeconfig + shared agent token as the backend.
+      - ${KUBECONFIG_DIR:-./kubeconfig}:/kubeconfig:ro
+      - local-agent-secret:/secret:ro
 
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      token-init:
+        condition: service_completed_successfully
 
     networks:
       - dfz-network
@@ -540,6 +566,92 @@ services:
           memory: 256M
 
   # ========================================
+  # Local agent — serves the clusters in your kubeconfig (no in-cluster install)
+  # ========================================
+  # The SAME dfz-agent that runs in-cluster, in kubeconfig mode: it reads the
+  # kubeconfig mounted below and serves EVERY context at /c/{context} — each
+  # cluster gets its own SQLite cache, built lazily on first view. The worker
+  # registers each context as a direct-mode cluster at startup (see
+  # DFZ_LOCAL_KUBECONFIG in x-app-env).
+  #
+  # Usage: put your kubeconfig at ./kubeconfig/config, then
+  #   docker compose restart local-agent worker
+  # The contexts appear as clusters in the UI. No kubeconfig → this service
+  # idles; in-cluster agents are unaffected either way.
+  #
+  # Limits: EKS/GKE default kubeconfigs authenticate via an exec plugin (aws /
+  # gke-gcloud-auth-plugin) that this image does not ship — connect those with
+  # the in-cluster agent instead (the API returns a clear error either way).
+  # For a cluster on THIS host whose kubeconfig says 127.0.0.1 (kind, minikube),
+  # point the kubeconfig server at host.docker.internal instead.
+  local-agent:
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.6.2}}
+    pull_policy: always
+    container_name: dfz-local-agent
+    restart: unless-stopped
+
+    environment:
+      - DFZ_AGENT_KUBECONFIG=/kubeconfig/config
+      - DFZ_CONNECTION_MODE=direct           # local: the backend dials us; no tunnel
+      - DFZ_AGENT_LISTEN=:8080
+      - DFZ_AGENT_DB=/data/agent.db
+      # Free the host from clusters nobody is viewing (0 disables eviction).
+      - DFZ_AGENT_IDLE_EVICT_MINUTES=${DFZ_AGENT_IDLE_EVICT_MINUTES:-15}
+      # Shared secret from token-init (file) — backend<->agent auth ON by
+      # default. DFZ_LOCAL_AGENT_TOKEN (env) overrides the file.
+      - DFZ_AGENT_TOKEN=${DFZ_LOCAL_AGENT_TOKEN:-}
+      - DFZ_AGENT_TOKEN_FILE=/secret/token
+      - DFZ_AGENT_REQUIRE_AUTH=${DFZ_AGENT_REQUIRE_AUTH:-true}
+
+    volumes:
+      - ${KUBECONFIG_DIR:-./kubeconfig}:/kubeconfig:ro
+      - local-agent-data:/data
+      - local-agent-secret:/secret:ro
+
+    # Makes host.docker.internal resolvable so a kubeconfig can target an
+    # apiserver running on this host (see the note above).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+      token-init:
+        condition: service_completed_successfully
+
+    networks:
+      - dfz-network
+
+    deploy:
+      resources:
+        limits:
+          cpus: '${LOCAL_AGENT_CPU_LIMIT:-2.0}'
+          # CEILING, not a reservation: idle RAM stays ~95M; it only bursts
+          # during a big relist (a transient list buffer that scales with the
+          # busiest cluster's object count). A cap set too close to the working
+          # set makes Go's GC thrash instead of OOM — keep the headroom.
+          memory: ${LOCAL_AGENT_MEM_LIMIT:-2G}
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Generates a random shared agent token ONCE into the secret volume
+  # (idempotent), so the backend<->local-agent link is authenticated by default
+  # — no hand-set secret. Backend, worker and local-agent read /secret/token;
+  # DFZ_LOCAL_AGENT_TOKEN (env) overrides it.
+  token-init:
+    image: busybox:1.36
+    command:
+      - sh
+      - -c
+      - 'test -s /secret/token || head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9 > /secret/token; chmod 0644 /secret/token'
+    volumes:
+      - local-agent-secret:/secret
+    networks:
+      - dfz-network
+    restart: "no"
+
+  # ========================================
   # Cluster agent — LAB helper, off by default.
   # ========================================
   # In a real deployment the agent runs INSIDE each target cluster (the add-cluster
@@ -589,4 +701,8 @@ volumes:
   postgres-data:
     driver: local
   redis-data:
+    driver: local
+  local-agent-data:        # local agent's per-cluster SQLite caches
+    driver: local
+  local-agent-secret:      # auto-generated shared agent token (token-init writes it)
     driver: local

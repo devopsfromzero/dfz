@@ -41,12 +41,16 @@ No external database or Redis needed — both ship in the compose file.
 | Worker (background jobs) | `ghcr.io/devopsfromzero/dfz-backend` | internal 8000 |
 | Terminal | `ghcr.io/devopsfromzero/dfz-terminal` | internal 8001 |
 | Gateway (agent tunnels) | `ghcr.io/devopsfromzero/dfz-gateway` | internal 3091/3092 |
+| Local agent (kubeconfig clusters) | `ghcr.io/devopsfromzero/dfz-agent` | internal 8080 |
 | PostgreSQL 16 | `postgres:16-alpine` | internal 5432 |
 | Redis 7 | `redis:7-alpine` | internal 6379 |
 
 Only the Caddy edge port is exposed to the host; it serves the app and the `/agent-tunnel` websocket on the same port. All inter-service traffic stays on the internal `dfz-network` bridge.
 
-**Connecting clusters:** each Kubernetes cluster is managed by a small agent (`ghcr.io/devopsfromzero/dfz-agent`) running *inside* that cluster. The add-cluster wizard in the UI generates its manifest; the agent dials out to this stack over the `/agent-tunnel` websocket — no inbound access to your clusters is required.
+**Connecting clusters** — two ways, same agent:
+
+- **In-cluster agent** (production): a small agent (`ghcr.io/devopsfromzero/dfz-agent`) runs *inside* each cluster. The add-cluster wizard in the UI generates its manifest; the agent dials out to this stack over the `/agent-tunnel` websocket — no inbound access to your clusters is required.
+- **Local kubeconfig** (no in-cluster install): put your kubeconfig at `./kubeconfig/config` and run `docker compose restart local-agent worker` — every context appears as a cluster, served by the bundled `local-agent`. Note: EKS/GKE default kubeconfigs (exec-plugin auth) need the in-cluster agent instead. Details: [docs/ADVANCED.md](docs/ADVANCED.md).
 
 ## Configuration
 

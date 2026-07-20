@@ -2,3 +2,6 @@
 *.local
 .DS_Store
 Thumbs.db
+
+# Local-agent kubeconfig drop — real cluster credentials, never commit.
+kubeconfig/

@@ -134,10 +134,18 @@ Only relevant when `USE_DISTRIBUTED_SINGLEFLIGHT=true` (the default). Most insta
 
 ## Cluster agents & collection
 
-Clusters are managed by an agent running inside each cluster; it dials out to this
-stack over the `/agent-tunnel` websocket (via the Caddy edge) and the stack derives
-its analytics (risk, waste, topology, dashboard) from what the agent collects. The
-related knobs (all already defaulted in `docker-compose.yml`):
+Every cluster is served by a dfz-agent — the hub never dials a cluster's API
+server itself. The agent runs in one of two places:
+
+- **In-cluster** (production): deployed inside each cluster via the add-cluster
+  wizard's manifest; it dials out to this stack over the `/agent-tunnel`
+  websocket (via the Caddy edge).
+- **Local kubeconfig** (bundled `local-agent` service): serves every context of
+  a kubeconfig you mount — no in-cluster install. See the next section.
+
+Either way, the stack derives its analytics (risk, waste, topology, dashboard)
+from what the agent collects. The related knobs (all already defaulted in
+`docker-compose.yml`):
 
 | Variable | Default | Where | Notes |
 |----------|---------|-------|-------|
@@ -148,6 +156,41 @@ related knobs (all already defaulted in `docker-compose.yml`):
 | `DFZ_GATEWAY_DEV_INSECURE` | `0` | `gateway` | Escape hatch that skips agent-token validation against the backend. Lab-only; keep `0` in production. |
 | `BACKEND_RUN_JOBS` | `false` | `backend` | Set `true` (and remove the `worker` service) for a single-container deploy that runs background jobs in the API process. |
 | `DFZ_HEARTBEAT_INTERVAL` | `30` (s) | agent (in-cluster) | How often each agent reports home; the UI marks a tunnel agent stale after ~120 s without one. |
+
+## Local clusters from a kubeconfig (bundled local-agent)
+
+For clusters your host can already reach (an on-prem RKE2/k3s, a VM lab, a
+remote dev cluster), you don't need an in-cluster install:
+
+1. Put the kubeconfig at `./kubeconfig/config` (the directory is created on
+   first `up`; the file may hold any number of contexts).
+2. `docker compose restart local-agent worker`
+3. Every context appears as a cluster in the UI, served by the `local-agent`
+   service. Contexts are lazy — a cluster is only watched once someone views it,
+   and its cache is evicted again after `DFZ_AGENT_IDLE_EVICT_MINUTES`.
+
+The kubeconfig **file is the source of truth**: add a context and restart to add
+a cluster, remove one and the cluster is dropped on the next worker start. The
+file stays on your host — the hub database stores no cluster credentials; only
+the local-agent reads them.
+
+Limits and notes:
+
+- **EKS/GKE default kubeconfigs won't work here** — they authenticate through an
+  exec plugin (`aws` / `gke-gcloud-auth-plugin`) that the agent image does not
+  ship. Connect those clusters with the in-cluster agent; the API returns a
+  clear error message if you try. Client-cert and static-token kubeconfigs
+  (RKE2, k3s, kubeadm, Rancher) work as-is.
+- A kubeconfig whose server is `127.0.0.1` (kind, minikube on this host) is
+  unreachable from inside the container — edit the server to
+  `host.docker.internal` (resolvable in the `local-agent` container).
+
+| Variable | Default | Where | Notes |
+|----------|---------|-------|-------|
+| `KUBECONFIG_DIR` | `./kubeconfig` | `backend` + `worker` + `local-agent` | Host directory mounted read-only at `/kubeconfig`; the file inside must be named `config`. |
+| `DFZ_AGENT_IDLE_EVICT_MINUTES` | `15` | `local-agent` | Evict an unviewed cluster's watchers + cache after this long; `0` disables eviction. |
+| `DFZ_LOCAL_AGENT_TOKEN` | auto-generated | `x-app-env` + `local-agent` | Shared backend↔local-agent secret. `token-init` generates one into a volume on first run; set this only to pin your own. |
+| `DFZ_AGENT_REQUIRE_AUTH` | `true` | `local-agent` | Keep `true`: the local agent rejects requests without the shared token. |
 
 ## Windows host monitoring (WinRM)
 
