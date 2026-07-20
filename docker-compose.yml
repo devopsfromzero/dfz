@@ -108,6 +108,16 @@ x-app-env: &app-env
   DFZ_LOCAL_AGENT_URL: "http://local-agent:8080"
   DFZ_LOCAL_AGENT_TOKEN: "${DFZ_LOCAL_AGENT_TOKEN:-}"
   DFZ_LOCAL_AGENT_TOKEN_FILE: "/secret/token"
+  # ── Hub-credential onboarding (opt-in; default OFF = today's file-drop path) ──
+  # DFZ_CREDENTIALS_FROM_HUB=true: an On-Premises upload is split into per-cluster
+  # vault-encrypted PG records and the local-agent fetches each cluster's creds
+  # from the hub (instead of a shared kubeconfig file). DFZ_DERIVE_SA=true adds the
+  # next step: the agent uses your uploaded credential ONCE to create its own
+  # ServiceAccount (dfz-system/dfz-agent-manager, cluster-admin) in the target
+  # cluster, then the hub keeps ONLY that token and discards your credential. Set
+  # both in .env to try them; leave unset for the unchanged file-drop behaviour.
+  DFZ_CREDENTIALS_FROM_HUB: "${DFZ_CREDENTIALS_FROM_HUB:-false}"
+  DFZ_DERIVE_SA: "${DFZ_DERIVE_SA:-false}"
 
 services:
   # ========================================
@@ -595,6 +605,11 @@ services:
     environment:
       - DFZ_AGENT_KUBECONFIG=/kubeconfig/config
       - DFZ_CONNECTION_MODE=direct           # local: the backend dials us; no tunnel
+      # Hub-credential mode (opt-in; matches the backend flag). When true the agent
+      # fetches each named cluster's credentials from the hub, falling back to the
+      # mounted kubeconfig on a miss — so it composes with the file-drop path.
+      - DFZ_CREDENTIALS_FROM_HUB=${DFZ_CREDENTIALS_FROM_HUB:-false}
+      - DFZ_SERVER_URL=${DFZ_SERVER_URL:-http://backend:8000}
       - DFZ_AGENT_LISTEN=:8080
       - DFZ_AGENT_DB=/data/agent.db
       # Free the host from clusters nobody is viewing (0 disables eviction).
