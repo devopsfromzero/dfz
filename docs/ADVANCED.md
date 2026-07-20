@@ -163,7 +163,20 @@ For clusters your host can already reach (an on-prem RKE2/k3s, a VM lab, a
 remote dev cluster), you don't need an in-cluster install:
 
 1. Put the kubeconfig at `./kubeconfig/config` (the directory is created on
-   first `up`; the file may hold any number of contexts).
+   first `up`). It is **one file, any number of contexts** — every context
+   becomes its own cluster. To serve several separate kubeconfig files, merge
+   them into that one file first:
+
+   ```bash
+   # Linux/macOS
+   KUBECONFIG=cluster-a.yaml:cluster-b.yaml:cluster-c.yaml \
+     kubectl config view --flatten > kubeconfig/config
+   ```
+   ```powershell
+   # Windows (PowerShell)
+   $env:KUBECONFIG = "cluster-a.yaml;cluster-b.yaml;cluster-c.yaml"
+   kubectl config view --flatten | Out-File -Encoding ascii kubeconfig\config
+   ```
 2. `docker compose restart local-agent worker`
 3. Every context appears as a cluster in the UI, served by the `local-agent`
    service. Contexts are lazy — a cluster is only watched once someone views it,
