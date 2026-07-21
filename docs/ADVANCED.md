@@ -205,6 +205,53 @@ Limits and notes:
 | `DFZ_LOCAL_AGENT_TOKEN` | auto-generated | `x-app-env` + `local-agent` | Shared backend↔local-agent secret. `token-init` generates one into a volume on first run; set this only to pin your own. |
 | `DFZ_AGENT_REQUIRE_AUTH` | `true` | `local-agent` | Keep `true`: the local agent rejects requests without the shared token. |
 
+### Storing credentials in the hub instead of the file (opt-in)
+
+By default the local-agent reads the shared `./kubeconfig/config` file (above). Two
+opt-in flags change *where the credential lives* and *whose credential it is* —
+both **default off**, so leaving them unset keeps the file-drop behaviour exactly.
+
+- **`DFZ_CREDENTIALS_FROM_HUB=true`** — an On-Premises **upload** in the UI is split
+  into one vault-encrypted record per context in PostgreSQL, and the local-agent
+  fetches each cluster's credentials from the hub at request time instead of a
+  shared file. Content-based onboarding: paste/upload the kubeconfig and the
+  clusters appear, with nothing dropped on disk. (Exec-plugin contexts are still
+  skipped, same as the file path.) The local-agent needs to reach the hub, so it
+  also needs `DFZ_SERVER_URL`.
+
+- **`DFZ_DERIVE_SA=true`** (builds on the above) — the first time the agent opens
+  such a cluster it uses your uploaded credential **once** to create its own
+  ServiceAccount in the target cluster (`dfz-system/dfz-agent-manager`, bound to
+  `cluster-admin`) plus a long-lived token, reports the token to the hub, and the
+  hub then keeps **only** that token — your uploaded credential is overwritten. So
+  DFZ stops holding your kubeconfig credential; you can rotate it freely. If the
+  uploaded credential lacks the RBAC to create the SA, the agent logs the reason
+  and keeps working with your credential (the cluster is never broken). The
+  profile list shows the credential state (`Managed SA` / `Deriving SA…`).
+  *Deleting the cluster removes the hub record but does not remove the derived SA
+  from the target cluster* — clean it up with `kubectl delete sa dfz-agent-manager
+  -n dfz-system` (+ its ClusterRoleBinding) if you want it gone.
+
+To enable, add the lines to the `environment:` blocks that read them and
+`docker compose up -d`:
+
+```yaml
+  # backend AND worker (they share the x-app-env anchor — add once there):
+  DFZ_CREDENTIALS_FROM_HUB: "true"
+  DFZ_DERIVE_SA: "true"           # optional; omit for hub-stored-credential only
+```
+```yaml
+  # local-agent service `environment:` list:
+      - DFZ_CREDENTIALS_FROM_HUB=true
+      - DFZ_SERVER_URL=http://backend:8000
+```
+
+| Variable | Default | Where | Notes |
+|----------|---------|-------|-------|
+| `DFZ_CREDENTIALS_FROM_HUB` | `false` | `x-app-env` (backend+worker) + `local-agent` | Store uploaded credentials as per-cluster encrypted PG records; the agent fetches them from the hub. Composes with the file path (agent falls back to the kubeconfig on a miss). |
+| `DFZ_DERIVE_SA` | `false` | `x-app-env` (backend+worker) | Derive DFZ's own cluster-admin ServiceAccount once and discard the uploaded credential. Requires `DFZ_CREDENTIALS_FROM_HUB`. |
+| `DFZ_SERVER_URL` | — | `local-agent` | How the agent reaches the hub for the credential fetch; `http://backend:8000` in this stack. Required when `DFZ_CREDENTIALS_FROM_HUB=true`. |
+
 ## Windows host monitoring (WinRM)
 
 VM monitoring collects Windows hosts agentlessly over WinRM (default port 5985). Authentication is Negotiate: **Kerberos** for domain-joined hosts, **NTLM** for workgroup hosts or hosts added by IP address.
