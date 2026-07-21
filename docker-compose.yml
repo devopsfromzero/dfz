@@ -604,6 +604,14 @@ services:
       - DFZ_AGENT_TOKEN=${DFZ_LOCAL_AGENT_TOKEN:-}
       - DFZ_AGENT_TOKEN_FILE=/secret/token
       - DFZ_AGENT_REQUIRE_AUTH=${DFZ_AGENT_REQUIRE_AUTH:-true}
+      # An On-Premises upload is stored as per-cluster encrypted records in the
+      # hub, and the agent fetches each cluster's credential from the hub at
+      # request time (a 404 falls back to the ./kubeconfig/config file above, so
+      # a hand-dropped file still works). How the credential is kept — stored by
+      # DFZ, or used once to derive DFZ's own ServiceAccount — is chosen per
+      # upload in the UI; nothing to toggle here. DFZ_SERVER_URL = the hub.
+      - DFZ_CREDENTIALS_FROM_HUB=true
+      - DFZ_SERVER_URL=http://backend:8000
 
     volumes:
       - ${KUBECONFIG_DIR:-./kubeconfig}:/kubeconfig:ro
