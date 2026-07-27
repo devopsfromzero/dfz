@@ -1,0 +1,17 @@
+# Line endings — the installer runs on Linux.
+#
+# offline/install.sh is executed by an operator on an air-gapped host. A CRLF
+# checked in from a Windows clone makes the shebang `#!/usr/bin/env bash\r`,
+# and the only symptom is "bad interpreter: No such file or directory" — a
+# message that says nothing about line endings, on a machine with no internet
+# to look it up from. Pin it rather than rely on everyone's core.autocrlf.
+*.sh text eol=lf
+
+# Compose, edge config and workflows are read by Linux tooling too.
+*.yml text eol=lf
+*.yaml text eol=lf
+Caddyfile text eol=lf
+
+*.md text
+*.env text
+config.env.example text eol=lf

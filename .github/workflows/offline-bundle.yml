@@ -1,0 +1,163 @@
+# Publish the air-gapped offline bundle — images, compose, installer, in one tarball.
+#
+# WHY THIS REPO BUILDS IT
+# Same reason bundle-bump lives here: the source repo is private and would need a
+# cross-repo token to publish anything to this one, while ghcr is public and this
+# repo can simply pull from it and release to itself with the automatic
+# GITHUB_TOKEN. The bundle is also the compose file plus the installer — both of
+# which live here — so it is built where its inputs are.
+#
+# WHY THE ASSET NAMES ARE STABLE
+# dfz-offline-<arch>.tar.gz, never dated, so
+# .../releases/latest/download/dfz-offline-amd64.tar.gz keeps working. Download
+# instructions for an air-gapped site get printed, pasted into a runbook and
+# followed a year later; a URL that changes every release is a URL that is wrong
+# by the time someone uses it. What is inside is answered by VERSION and by the
+# release notes.
+#
+# WHY IT IS NOT TRIGGERED BY bundle-bump's PUSH
+# A push made with GITHUB_TOKEN deliberately does not start other workflows, so
+# a `on: push` trigger here would never fire for the commits that matter. The
+# bump workflow calls this one directly instead (`workflow_call`).
+name: Offline bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Ref to build from'
+        required: false
+        default: 'main'
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Ref to build from'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: offline-bundle
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Create the release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # bundle-bump pushes the new pins and THEN calls this workflow, so the
+          # triggering SHA predates them. Checking out the ref by name is what
+          # gets the bundle the versions that were just pinned.
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Read the pinned set
+        id: meta
+        run: |
+          set -euo pipefail
+          images=$(docker compose config --images | sort -u)
+          version_of () { printf '%s\n' "$images" | sed -n "s#^ghcr.io/devopsfromzero/dfz-$1:##p" | head -n1; }
+
+          backend=$(version_of backend); ui=$(version_of ui)
+          terminal=$(version_of terminal); agent=$(version_of agent); gateway=$(version_of gateway)
+          for v in "$backend" "$ui" "$terminal" "$agent" "$gateway"; do
+            [ -n "$v" ] || { echo "::error::Could not read every component version from the compose pins."; exit 1; }
+          done
+
+          tag="offline-$(date -u '+%Y.%m.%d')"
+          {
+            echo "tag=$tag"
+            echo "title=DFZ offline bundle — backend $backend, ui $ui"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "Air-gapped install bundle: every container image, the compose file, the edge"
+            echo "config and the installer in one tarball. Nothing is downloaded during the install."
+            echo
+            echo '| Component | Version |'
+            echo '|---|---|'
+            echo "| backend | \`$backend\` |"
+            echo "| ui | \`$ui\` |"
+            echo "| terminal | \`$terminal\` |"
+            echo "| agent | \`$agent\` |"
+            echo "| gateway | \`$gateway\` |"
+            echo
+            echo '```bash'
+            echo "curl -LO https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/dfz-offline-amd64.tar.gz"
+            echo "curl -LO https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/dfz-offline-amd64.tar.gz.sha256"
+            echo 'sha256sum -c dfz-offline-amd64.tar.gz.sha256'
+            echo 'tar xzf dfz-offline-amd64.tar.gz && cd dfz-offline-*-amd64'
+            echo 'cp config.env.example config.env    # fill in your registry'
+            echo './install.sh                        # or: ./install.sh --no-registry'
+            echo '```'
+            echo
+            echo 'Full instructions: the README.md inside the bundle, or [offline/README.md](../blob/main/offline/README.md).'
+          } > notes.md
+
+      - name: Create or refresh the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.meta.outputs.tag }}'
+          # Same-day rebuilds reuse the release; the assets are uploaded with
+          # --clobber below, so the newest build wins rather than erroring out.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title '${{ steps.meta.outputs.title }}' --notes-file notes.md --latest
+          else
+            gh release create "$tag" --title '${{ steps.meta.outputs.title }}' --notes-file notes.md --latest
+          fi
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # One runner per architecture: a single job would need ~16 GB of scratch
+        # for both, which is more than a hosted runner has. Split, each gets its
+        # own disk. arm64 is pulled (not run) on an amd64 runner, which Docker
+        # supports and is what makes this cheap.
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Free up disk
+        run: |
+          # ~3.5 GB of images, the same again as a tar, plus the gzip. The
+          # preinstalled toolchains this job never touches are worth ~25 GB.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Build the bundle
+        run: ./offline/build-bundle.sh --arch ${{ matrix.arch }} --out dist
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload '${{ needs.prepare.outputs.tag }}' \
+            "dist/dfz-offline-${{ matrix.arch }}.tar.gz" \
+            "dist/dfz-offline-${{ matrix.arch }}.tar.gz.sha256" \
+            --clobber
+
+      - name: Summary
+        run: |
+          {
+            echo "### Offline bundle — ${{ matrix.arch }}"
+            echo
+            ls -lh dist/ | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"

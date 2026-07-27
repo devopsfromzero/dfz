@@ -34,6 +34,8 @@ jobs:
   bump:
     name: Pin newly released versions
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -90,12 +92,12 @@ jobs:
             fi
 
             echo "  ${module}: ${current} -> ${newest}  BUMP"
+            # DFZ_AGENT_IMAGE needs no special case: it now DERIVES its tag from
+            # the same ${AGENT_TAG:-${TAG:-vX}} pin as the agent `image:` lines,
+            # so this one sed moves all three. It used to carry a literal version
+            # and a second sed of its own — the arrangement that let it drift a
+            # release behind and hand user clusters a stale agent.
             sed -i -E "/dfz-${module}:/ s/(TAG:-)v[0-9]+\.[0-9]+\.[0-9]+(\}\})/\1${newest}\2/" docker-compose.yml
-            if [ "$module" = "agent" ]; then
-              # The wizard hands this image to every managed cluster; leaving it
-              # behind would pin user clusters to an old agent.
-              sed -i -E "/DFZ_AGENT_IMAGE:/ s|(dfz-agent:)v[0-9]+\.[0-9]+\.[0-9]+|\1${newest}|" docker-compose.yml
-            fi
             CHANGED="${CHANGED}- ${module} \`${newest}\`"$'\n'
           done
 
@@ -170,3 +172,18 @@ jobs:
             "Released on ghcr and validated here: compose config, pin invariant, and every pinned tag confirmed pullable."
           git push origin HEAD:main
           echo "Pushed: ${summary}"
+
+  # The offline bundle ships the images these pins name, so a bump that does not
+  # rebuild it leaves air-gapped sites a release behind — the same silent drift
+  # this workflow exists to prevent, one step further down the chain. Called
+  # directly rather than left to `on: push`: a push made with GITHUB_TOKEN does
+  # not start other workflows, so that trigger would never fire here.
+  bundle:
+    name: Refresh the offline bundle
+    needs: bump
+    if: needs.bump.outputs.changed == 'true'
+    uses: ./.github/workflows/offline-bundle.yml
+    with:
+      ref: main
+    permissions:
+      contents: write

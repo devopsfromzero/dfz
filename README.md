@@ -52,9 +52,38 @@ Only the Caddy edge port is exposed to the host; it serves the app and the `/age
 - **In-cluster agent** (production): a small agent (`ghcr.io/devopsfromzero/dfz-agent`) runs *inside* each cluster. The add-cluster wizard in the UI generates its manifest; the agent dials out to this stack over the `/agent-tunnel` websocket — no inbound access to your clusters is required.
 - **Local kubeconfig** (no in-cluster install): put your kubeconfig at `./kubeconfig/config` and run `docker compose restart local-agent worker` — every context appears as a cluster, served by the bundled `local-agent`. Note: EKS/GKE default kubeconfigs (exec-plugin auth) need the in-cluster agent instead. Details: [docs/ADVANCED.md](docs/ADVANCED.md).
 
+## Air-gapped / offline install
+
+For hosts with no route to the internet, download the offline bundle: every
+container image, this compose file, the edge config and an installer, in one
+tarball. Nothing is fetched during the install.
+
+```bash
+curl -LO https://github.com/devopsfromzero/dfz/releases/latest/download/dfz-offline-amd64.tar.gz
+curl -LO https://github.com/devopsfromzero/dfz/releases/latest/download/dfz-offline-amd64.tar.gz.sha256
+sha256sum -c dfz-offline-amd64.tar.gz.sha256
+
+tar xzf dfz-offline-amd64.tar.gz && cd dfz-offline-*-amd64
+cp config.env.example config.env      # your registry + credentials
+./install.sh
+```
+
+`install.sh` loads the images, pushes them to your registry, points the compose
+file at it and starts the stack. No registry? `./install.sh --no-registry` runs
+everything from the locally loaded images — the dashboard, Docker hosts and
+kubeconfig-served clusters all work; in-cluster Kubernetes agents need a registry
+your clusters can reach, and the installer says so rather than leaving you to
+find out later.
+
+`arm64` bundles are published alongside the `amd64` ones. Details:
+[`offline/README.md`](offline/README.md).
+
 ## Configuration
 
-All configuration is defined as defaults directly in `docker-compose.yml` — there is no separate `.env` file. To override a default, edit the relevant value in the compose file, then run `docker compose up -d`.
+Every tunable has a default baked into `docker-compose.yml`, so a normal install
+needs no `.env` at all. To change one, either edit the value in the compose file
+or set it in a `.env` beside it, then run `docker compose up -d`. (The offline
+installer writes that `.env` for you.)
 
 Common overrides (search for the variable name in `docker-compose.yml`):
 
@@ -64,6 +93,9 @@ Common overrides (search for the variable name in `docker-compose.yml`):
 | `UI_PORT` | `caddy.ports` | Host port of the Caddy edge |
 | `SECURE_COOKIES` | `x-app-env` + `terminal` / `ui` environment blocks | Set to `true` when serving behind HTTPS |
 | `BACKEND_TAG` / `UI_TAG` / `TERMINAL_TAG` / `AGENT_TAG` / `GATEWAY_TAG` | Each service's `image:` line | Override a service's version (components version independently; each falls back to `TAG`, then to the tested default this commit pins) |
+| `REGISTRY` | Every DFZ `image:` line, and `DFZ_AGENT_IMAGE` | Private registry the DFZ images were mirrored into. Setting it also makes the add-cluster wizard offer the mirrored agent image |
+| `BASE_REGISTRY` | `caddy` / `postgres` / `redis` / `busybox` images | Where the third-party images live, if those are mirrored too |
+| `PULL_POLICY` | Every service | `always` (default) / `missing` / `never`. `never` is the air-gapped setting: a missing image fails immediately instead of hanging on an unreachable registry |
 
 Rolling back a subsystem (Redis, informers, etc.) or tuning performance knobs? See [`docs/ADVANCED.md`](docs/ADVANCED.md).
 
