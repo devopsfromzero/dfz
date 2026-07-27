@@ -14,6 +14,12 @@ To roll back: same, with an earlier one.
 
 ## 2026-07-27
 
+- backend `v2.9.6`
+- ui `v0.9.7`
+
+
+## 2026-07-27
+
 - ui `v0.9.6`
 
 
