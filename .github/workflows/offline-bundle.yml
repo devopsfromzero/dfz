@@ -15,10 +15,12 @@
 # by the time someone uses it. What is inside is answered by VERSION and by the
 # release notes.
 #
-# WHY IT IS NOT TRIGGERED BY bundle-bump's PUSH
-# A push made with GITHUB_TOKEN deliberately does not start other workflows, so
-# a `on: push` trigger here would never fire for the commits that matter. The
-# bump workflow calls this one directly instead (`workflow_call`).
+# WHY MANUAL-ONLY (workflow_dispatch, nothing else)
+# Deliberate operator decision (2026-07-28): the bundle is published only when
+# a human triggers it — Actions tab -> "Offline bundle" -> Run workflow, or
+# `gh workflow run offline-bundle.yml`. No cron, no chaining from bundle-bump.
+# The accepted cost: after a release, trigger this by hand or the offline
+# bundle lags behind the pins. Do not re-add automatic triggers.
 name: Offline bundle
 
 on:
@@ -27,13 +29,6 @@ on:
       ref:
         description: 'Ref to build from'
         required: false
-        default: 'main'
-  workflow_call:
-    inputs:
-      ref:
-        description: 'Ref to build from'
-        required: false
-        type: string
         default: 'main'
 
 permissions:

@@ -34,8 +34,6 @@ jobs:
   bump:
     name: Pin newly released versions
     runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.bump.outputs.changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -173,17 +171,10 @@ jobs:
           git push origin HEAD:main
           echo "Pushed: ${summary}"
 
-  # The offline bundle ships the images these pins name, so a bump that does not
-  # rebuild it leaves air-gapped sites a release behind — the same silent drift
-  # this workflow exists to prevent, one step further down the chain. Called
-  # directly rather than left to `on: push`: a push made with GITHUB_TOKEN does
-  # not start other workflows, so that trigger would never fire here.
-  bundle:
-    name: Refresh the offline bundle
-    needs: bump
-    if: needs.bump.outputs.changed == 'true'
-    uses: ./.github/workflows/offline-bundle.yml
-    with:
-      ref: main
-    permissions:
-      contents: write
+# NOTE: this workflow deliberately does NOT rebuild the offline bundle.
+# Rebuilding is a manual, operator-triggered step (offline-bundle.yml,
+# "Run workflow") — an explicit decision (2026-07-28): the operator wants
+# bundle publishing under their control, not fired by automation. The cost:
+# after a release, someone must remember to trigger it, or the offline
+# bundle lags behind the pins. That trade was chosen knowingly — do not
+# quietly re-add a `bundle` job here.
