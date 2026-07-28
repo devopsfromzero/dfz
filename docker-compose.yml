@@ -172,7 +172,7 @@ services:
   # Backend — FastAPI (stateless, multi-worker)
   # ========================================
   backend:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.10.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.11.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-backend
     restart: unless-stopped
@@ -233,7 +233,7 @@ services:
   # them for the event loop. Nothing routes here (Caddy → UI → backend).
   # --workers 1 keeps a single process holding the PG leader lock.
   worker:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.10.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.11.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-worker
     restart: unless-stopped
@@ -300,7 +300,7 @@ services:
   # It takes a distinct PG advisory leader lock (base+2), so it leads its own
   # group independently of the core worker.
   worker-monitoring:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.10.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.11.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-worker-monitoring
     restart: unless-stopped
