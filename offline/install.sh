@@ -204,28 +204,45 @@ probe_registry_api () {
     dim "curl is not installed — skipping the registry address check."
     return 0
   fi
+
+  # Plain-HTTP registries are normal on an internal network. Ask the daemon
+  # whether THIS host is registered insecure and try that scheme first, so the
+  # check does not spend its timeout on a TLS port that was never there — and so
+  # the operator is told which scheme actually answered.
+  local schemes="https http" insecure
+  insecure="$(docker info --format \
+    '{{range $k, $v := .RegistryConfig.IndexConfigs}}{{if not $v.Secure}}{{$k}} {{end}}{{end}}' \
+    2>/dev/null || true)"
+  case " $insecure " in
+    *" $REGISTRY_HOST "*) schemes="http https"; dim "$REGISTRY_HOST is configured as an insecure registry on this host." ;;
+  esac
+
   local scheme code seen=""
-  for scheme in https http; do
+  for scheme in $schemes; do
     code="$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "$scheme://$REGISTRY_HOST/v2/" 2>/dev/null || echo 000)"
     case "$code" in
       # 401/403 are the healthy answers for a registry that wants credentials.
+      # NOTE: this only proves a registry API exists at the ROOT. It does NOT
+      # prove your namespace resolves there — some registries answer /v2/ on the
+      # main port while serving each repository on a port of its own, so the
+      # push is still the real test. The push failure is reported in full below.
       200|401|403) info "Docker registry API answers at $scheme://$REGISTRY_HOST/v2/"; return 0 ;;
-      000) continue ;;   # no TLS / no route on this scheme — try the other one
+      000) continue ;;   # nothing listening / TLS refused on this scheme
       404)
-        die "$REGISTRY_HOST is reachable but serves no Docker registry API at /v2/ (HTTP 404).
-    The most common cause is the port: some registries publish their Docker API
-    on a port of its own rather than on 443. Open the registry's own UI, find the
-    address it tells you to use for 'docker login', and put THAT in REGISTRY —
-    including the port if it names one, e.g. registry.example.com:5000/${REGISTRY#*/}.
-    Note that '${REGISTRY#*/}' is the namespace your images are pushed into; it is
-    part of the image name, never part of the registry address." ;;
+        die "$REGISTRY_HOST is reachable over $scheme but serves no Docker registry API at /v2/ (HTTP 404).
+    That address is not the one to push to. Open the registry's own UI and use
+    the address it publishes for 'docker login' — if it names a port of its own
+    for this repository, that port belongs in REGISTRY:
+        REGISTRY=$REGISTRY_BARE_HOST:<port>/${REGISTRY#*/}
+    '${REGISTRY#*/}' is the namespace your images land in; it is part of the
+    image name and never part of the registry address." ;;
       *) seen="$code" ;;
     esac
   done
   if [ -n "$seen" ]; then
     warn "$REGISTRY_HOST answered HTTP $seen at /v2/ instead of 200/401. Continuing, but a push may fail."
   else
-    dim "Could not reach $REGISTRY_HOST to check it (TLS or network). Continuing."
+    dim "Could not reach $REGISTRY_HOST over http or https to check it. Continuing."
   fi
 }
 
@@ -236,6 +253,10 @@ elif [ "$MODE" = registry ]; then
   # The host[:port] is what `docker login` authenticates against — a repository
   # path underneath it is not part of the credential's scope.
   REGISTRY_HOST="${REGISTRY%%/*}"
+  # Without the port, for the "you may need a port" suggestions: appending one to
+  # an address that already has a port produces host:8081:<port>, which is worse
+  # than no advice at all.
+  REGISTRY_BARE_HOST="${REGISTRY_HOST%%:*}"
   info "Mirroring into $REGISTRY (login host: $REGISTRY_HOST)"
   [ "$BASE_REGISTRY" = "$REGISTRY" ] || info "Third-party images go to $BASE_REGISTRY"
   probe_registry_api
@@ -290,7 +311,11 @@ if [ "$MODE" = registry ]; then
       [ -n "$REGISTRY_PASSWORD" ] || die "REGISTRY_USERNAME is set but REGISTRY_PASSWORD is empty."
       printf '%s' "$REGISTRY_PASSWORD" \
         | docker login "$REGISTRY_HOST" --username "$REGISTRY_USERNAME" --password-stdin \
-        || die "docker login failed against $REGISTRY_HOST. Check the credentials, and that this host trusts the registry's TLS certificate."
+        || die "docker login failed against $REGISTRY_HOST.
+    Check the credentials first. If the message mentions TLS or certificates:
+    a registry served over plain HTTP, or with a self-signed certificate, has to
+    be named in the Docker daemon's config ('insecure-registries' in
+    /etc/docker/daemon.json, then restart docker)."
       info "Logged in to $REGISTRY_HOST."
     fi
   else
@@ -314,10 +339,17 @@ if [ "$MODE" = registry ]; then
         | tail -n 3 | tr '\n' ' ' | cut -c1-300)"
       die "$REGISTRY_HOST rejected $target.
     It said: ${reason:-(no message)}
-    Usual causes: the namespace '${target%/*}' does not exist yet and this
-    registry will not create it on a push, or this account cannot write to it.
-    Create it (or grant write access) in the registry's own UI, then re-run —
-    every step here is idempotent, so a re-run resumes rather than restarts."
+
+    'not found' here is about the ADDRESS, not the credentials — logging in
+    succeeds per-host, so a valid account proves nothing about the path. Either:
+      • this repository is served on a port of its own and REGISTRY needs it
+        ($REGISTRY_BARE_HOST:<port>/${REGISTRY#*/}) — the registry's UI publishes
+        the address to use; or
+      • the namespace '${REGISTRY#*/}' does not exist and this registry will not
+        create it on a push.
+    'unauthorized' / 'denied' instead means the account cannot write there.
+    Fix it in the registry, then re-run — every step here is idempotent, so a
+    re-run resumes rather than restarts."
     fi
   done < images/manifest.txt
 

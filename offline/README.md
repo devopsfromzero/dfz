@@ -110,9 +110,12 @@ docker compose down -v       # also delete the volumes — this deletes your dat
 
 ## If something goes wrong
 
-**`docker login` fails.** Usually TLS: the host has to trust the registry's
-certificate. Check `docker info` for the registry under "Insecure Registries" if
-you use a self-signed one.
+**`docker login` fails on TLS.** A registry served over plain HTTP, or with a
+self-signed certificate, has to be named in the Docker daemon's config:
+`insecure-registries` in `/etc/docker/daemon.json`, then restart docker. Confirm
+it took with `docker info` — the host should be listed under "Insecure
+Registries". Plain-HTTP registries are fully supported; the installer detects
+this setting and checks the address over HTTP accordingly.
 
 **A push is rejected.** The namespace has to exist and the account needs write
 access to it. The installer prints what the registry said, so read that line
