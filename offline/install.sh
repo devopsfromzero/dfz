@@ -76,7 +76,7 @@ run () {
 # ── configuration ────────────────────────────────────────────────────────────
 # config.env is PARSED as literal KEY=VALUE, deliberately not `source`d.
 #
-# A Harbor robot account is named things like `robot$dfz`, and registry
+# Registry service accounts are commonly named things like `robot$dfz`, and
 # passwords routinely contain $, #, backticks or spaces. Sourcing expands and
 # word-splits every one of those: under `set -u` the install dies with a
 # baffling "dfz: unbound variable", and without it the credential is silently
@@ -191,6 +191,44 @@ if [ "$FREE_KB" -lt "$NEED_KB" ]; then
   warn "Only $(( FREE_KB / 1024 )) MB free here; loading needs roughly $(( NEED_KB / 1024 )) MB. Free some space if the load fails."
 fi
 
+# Does this address actually serve a Docker registry API? Checked HERE, before
+# the multi-minute image load, because the alternative is what it replaced: load
+# everything, log in successfully, then fail on the first push with the
+# registry's raw 404 page — minutes spent to learn the address was wrong.
+#
+# `docker login` succeeding proves nothing about the path: authentication is
+# per-host, so a correct account on the right host still pushes into a namespace
+# that may not exist. Only /v2/ answers that question.
+probe_registry_api () {
+  if ! command -v curl >/dev/null 2>&1; then
+    dim "curl is not installed — skipping the registry address check."
+    return 0
+  fi
+  local scheme code seen=""
+  for scheme in https http; do
+    code="$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "$scheme://$REGISTRY_HOST/v2/" 2>/dev/null || echo 000)"
+    case "$code" in
+      # 401/403 are the healthy answers for a registry that wants credentials.
+      200|401|403) info "Docker registry API answers at $scheme://$REGISTRY_HOST/v2/"; return 0 ;;
+      000) continue ;;   # no TLS / no route on this scheme — try the other one
+      404)
+        die "$REGISTRY_HOST is reachable but serves no Docker registry API at /v2/ (HTTP 404).
+    The most common cause is the port: some registries publish their Docker API
+    on a port of its own rather than on 443. Open the registry's own UI, find the
+    address it tells you to use for 'docker login', and put THAT in REGISTRY —
+    including the port if it names one, e.g. registry.example.com:5000/${REGISTRY#*/}.
+    Note that '${REGISTRY#*/}' is the namespace your images are pushed into; it is
+    part of the image name, never part of the registry address." ;;
+      *) seen="$code" ;;
+    esac
+  done
+  if [ -n "$seen" ]; then
+    warn "$REGISTRY_HOST answered HTTP $seen at /v2/ instead of 200/401. Continuing, but a push may fail."
+  else
+    dim "Could not reach $REGISTRY_HOST to check it (TLS or network). Continuing."
+  fi
+}
+
 if [ "$LOAD_ONLY" = true ]; then
   info "Load-only run — nothing will be pushed or started."
 elif [ "$MODE" = registry ]; then
@@ -200,6 +238,7 @@ elif [ "$MODE" = registry ]; then
   REGISTRY_HOST="${REGISTRY%%/*}"
   info "Mirroring into $REGISTRY (login host: $REGISTRY_HOST)"
   [ "$BASE_REGISTRY" = "$REGISTRY" ] || info "Third-party images go to $BASE_REGISTRY"
+  probe_registry_api
 else
   info "Local mode — no registry will be contacted."
 fi
@@ -264,8 +303,22 @@ if [ "$MODE" = registry ]; then
     info "$img"
     dim  "  -> $target"
     run docker tag "$img" "$target"
-    run docker push "$target" >/dev/null \
-      || die "Pushing $target failed. Does the repository exist, and may this user write to it? (Harbor requires the project to exist first.)"
+    if [ "$DRY_RUN" = true ]; then
+      dim "would run: docker push $target"
+    elif ! push_out="$(docker push "$target" 2>&1)"; then
+      # A registry that does not recognise the path answers with its own HTML
+      # error page, and `docker push` relays the whole thing. Dumping that here
+      # buries the one line that carries the reason, so pull out the text lines.
+      reason="$(printf '%s\n' "$push_out" \
+        | grep -viE '^[[:space:]]*<|DOCTYPE|^[[:space:]]*$' \
+        | tail -n 3 | tr '\n' ' ' | cut -c1-300)"
+      die "$REGISTRY_HOST rejected $target.
+    It said: ${reason:-(no message)}
+    Usual causes: the namespace '${target%/*}' does not exist yet and this
+    registry will not create it on a push, or this account cannot write to it.
+    Create it (or grant write access) in the registry's own UI, then re-run —
+    every step here is idempotent, so a re-run resumes rather than restarts."
+    fi
   done < images/manifest.txt
 
   info "All images mirrored."

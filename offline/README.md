@@ -40,8 +40,17 @@ registry, writes a `.env` that points the compose file at it, and starts the
 stack. The password is fed to `docker login` on stdin — never as a command-line
 argument, where every user on the host could read it out of `ps`.
 
-**Harbor:** create the project first. Pushing to a project that does not exist
-is rejected, and the error message does not make the reason obvious.
+Two things to get right in `config.env`:
+
+- **The address.** Use exactly what your registry tells you to use for
+  `docker login` — some registries serve their Docker API on a port of their
+  own rather than on 443, and that port belongs in `REGISTRY`. Everything after
+  the host is the namespace your images land in, not part of the address.
+  `install.sh` checks this before it loads anything, so a wrong address costs
+  seconds rather than minutes.
+- **The namespace.** Many registries reject a push into a namespace they were
+  not told to create. Create it in the registry's UI first, and make sure the
+  account can write to it.
 
 ### Run straight from the local images
 
@@ -105,8 +114,14 @@ docker compose down -v       # also delete the volumes — this deletes your dat
 certificate. Check `docker info` for the registry under "Insecure Registries" if
 you use a self-signed one.
 
-**A push is rejected.** The repository or Harbor project has to exist, and the
-account needs write access to it.
+**A push is rejected.** The namespace has to exist and the account needs write
+access to it. The installer prints what the registry said, so read that line
+first — "not found" points at the address or the namespace, "unauthorized" at
+the account's permissions on it.
+
+**"serves no Docker registry API at /v2/".** The address in `REGISTRY` is not
+the one the registry expects for `docker login` — most often a missing port.
+Check the registry's UI for the address it publishes.
 
 **`image not found locally`.** The stack is set to `PULL_POLICY=never`, which is
 deliberate — it fails fast instead of hanging on a registry it cannot reach.
