@@ -98,9 +98,26 @@ DFZ only ever references that secret by name — it never sees the credentials.
 ## Upgrading
 
 Download the next bundle, extract it beside this one, and run its `install.sh`
-with the same `config.env`. It loads the new images, finds your existing stack
-and upgrades it in place. Your data lives in Docker volumes and stays where it
-is; the installer prints which compose project it is upgrading.
+with the same `config.env`:
+
+```bash
+./install.sh --status     # what is installed, what this bundle would change
+./install.sh              # upgrade
+```
+
+The upgrade, in order: it finds your existing stack, prints the plan
+(component by component, installed → bundle), **dumps the database** to
+`backups/`, records the current versions for `--rollback`, starts the new
+containers, and then **verifies** that what is running really is the image this
+bundle carries — comparing image IDs, not tags. If it is not, it says so and
+exits non-zero instead of reporting success.
+
+Your data lives in Docker volumes and stays where it is.
+
+```bash
+./install.sh --rollback   # back to the previous set (its images are still here)
+./install.sh --no-backup  # skip the dump — not recommended
+```
 
 **If you installed before 2026-07-29**, your stack runs under a compose project
 named after the directory you extracted that bundle into (for example
@@ -124,9 +141,21 @@ follow from it:
 ## Uninstall
 
 ```bash
-docker compose down          # stop, keep data
-docker compose down -v       # also delete the volumes — this deletes your data
+docker compose down          # stop the stack; your data stays in its volumes
 ```
+
+To delete the data as well — the database, the stored credentials and the key
+that decrypts them — you must name the volumes yourself:
+
+```bash
+docker compose down
+docker volume ls | grep -E 'postgres-data|backend-secrets'   # look first
+docker volume rm <project>_postgres-data <project>_backend-secrets
+```
+
+`docker compose down -v` does the same thing in one keystroke and is not
+written out here on purpose: it is one character away from the safe command,
+and there is no undo.
 
 ## If something goes wrong
 

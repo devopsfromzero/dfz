@@ -40,8 +40,13 @@ usage () {
   cat <<'EOF'
 
 Options:
+  --status          Show what is installed and what this bundle would change.
+                    Reads only; changes nothing.
+  --rollback        Put the previous version set back (its images are still on
+                    this host after an upgrade).
   --no-registry     Skip the registry entirely; run from locally loaded images.
   --load-only       Load the images and stop. Nothing is pushed or started.
+  --no-backup       Skip the pre-upgrade database dump. Not recommended.
   --config FILE     Read settings from FILE (default: ./config.env).
   --dry-run         Print what would happen; change nothing.
   -h, --help        Show this help.
@@ -55,10 +60,16 @@ EOF
 MODE=registry
 LOAD_ONLY=false
 DRY_RUN=false
+STATUS_ONLY=false
+ROLLBACK=false
+BACKUP=true
 CONFIG_FILE="config.env"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --status)      STATUS_ONLY=true ;;
+    --rollback)    ROLLBACK=true ;;
+    --no-backup)   BACKUP=false ;;
     --no-registry) MODE=local ;;
     --load-only)   LOAD_ONLY=true ;;
     --dry-run)     DRY_RUN=true ;;
@@ -71,6 +82,73 @@ done
 
 run () {
   if [ "$DRY_RUN" = true ]; then dim "would run: $*"; else "$@"; fi
+}
+
+# ── what is installed ────────────────────────────────────────────────────────
+# Everything here reads Docker, never the compose file: the question is what is
+# RUNNING, and the compose file only says what should be.
+
+SERVICES="backend ui terminal gateway"
+PREVIOUS_FILE=".dfz-previous-versions"
+
+container_for () {
+  case "$1" in
+    backend) printf 'dfz-backend' ;;
+    ui)      printf 'dfz-ui' ;;
+    terminal) printf 'dfz-terminal' ;;
+    gateway) printf 'dfz-gateway' ;;
+    agent)   printf 'dfz-local-agent' ;;
+  esac
+}
+
+bundle_version_of () {
+  case "$1" in
+    backend)  printf '%s' "${BACKEND_VERSION:-}" ;;
+    ui)       printf '%s' "${UI_VERSION:-}" ;;
+    terminal) printf '%s' "${TERMINAL_VERSION:-}" ;;
+    gateway)  printf '%s' "${GATEWAY_VERSION:-}" ;;
+    agent)    printf '%s' "${AGENT_VERSION:-}" ;;
+  esac
+}
+
+# The tag a container is actually running, e.g. v2.11.0. Empty when absent.
+running_version_of () {
+  local ref
+  ref="$(docker inspect "$(container_for "$1")" --format '{{.Config.Image}}' 2>/dev/null || true)"
+  [ -n "$ref" ] || return 0
+  printf '%s' "${ref##*:}"
+}
+
+find_existing_project () {
+  local c found
+  for c in dfz-backend dfz-postgres dfz-ui; do
+    found="$(docker inspect "$c" \
+      --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+    [ -n "$found" ] || continue
+    printf '%s' "$found"
+    return 0
+  done
+}
+
+print_plan () {
+  local svc now want changes=0
+  printf '\n'
+  printf '    %-10s %-14s %s\n' "component" "installed" "this bundle"
+  for svc in $SERVICES; do
+    now="$(running_version_of "$svc")"
+    want="$(bundle_version_of "$svc")"
+    if [ -z "$now" ]; then
+      printf '    %-10s %-14s %s\n' "$svc" "-" "$want"
+      changes=1
+    elif [ "$now" = "$want" ]; then
+      printf '    %-10s %-14s %s (no change)\n' "$svc" "$now" "$want"
+    else
+      printf '    %-10s %-14s %s  <= upgrade\n' "$svc" "$now" "$want"
+      changes=1
+    fi
+  done
+  printf '\n'
+  return $changes
 }
 
 # ── configuration ────────────────────────────────────────────────────────────
@@ -124,9 +202,12 @@ CONFIG_LOADED=false
 if [ -f "$CONFIG_FILE" ]; then
   read_settings "$CONFIG_FILE"
   CONFIG_LOADED=true
-elif [ "$MODE" = registry ] && [ "$LOAD_ONLY" = false ] && [ -z "${REGISTRY:-}" ]; then
+elif [ "$MODE" = registry ] && [ "$LOAD_ONLY" = false ]      && [ "$STATUS_ONLY" = false ] && [ "$ROLLBACK" = false ]      && [ -z "${REGISTRY:-}" ]; then
   # --load-only never reaches the registry, so it must not demand one; that is
   # the flag people use to stage images on a host before deciding anything else.
+  # --status only reads, and --rollback runs images that are already here:
+  # neither may be blocked by a missing config, or the two commands you need
+  # when something has gone wrong are the two you cannot run.
   die "No $CONFIG_FILE and no REGISTRY set. Copy config.env.example to config.env and fill it in, or use --no-registry."
 fi
 
@@ -182,6 +263,44 @@ if [ "$HOST_ARCH" != "${BUNDLE_ARCH:-}" ]; then
   die "This is the ${BUNDLE_ARCH:-unknown} bundle but the host is $HOST_ARCH. Download the $HOST_ARCH bundle instead."
 fi
 info "Bundle ${BUNDLE_DATE:-?} for $BUNDLE_ARCH — backend ${BACKEND_VERSION:-?}, ui ${UI_VERSION:-?}, agent ${AGENT_VERSION:-?}"
+
+# ── status ───────────────────────────────────────────────────────────────────
+if [ "$STATUS_ONLY" = true ]; then
+  step "Installed"
+  EXISTING_PROJECT="$(find_existing_project)"
+  if [ -z "$EXISTING_PROJECT" ]; then
+    info "No DFZ stack found on this host."
+  else
+    info "compose project: $EXISTING_PROJECT"
+    docker volume ls --format '{{.Name}}' \
+      | grep -E "^${EXISTING_PROJECT}_(postgres-data|backend-secrets)$" \
+      | sed 's/^/    data volume: /' || true
+  fi
+  step "This bundle"
+  info "${BUNDLE_DATE:-?} for ${BUNDLE_ARCH:-?}"
+  print_plan || true
+  exit 0
+fi
+
+# ── rollback ─────────────────────────────────────────────────────────────────
+if [ "$ROLLBACK" = true ]; then
+  [ -f "$PREVIOUS_FILE" ] || die "No $PREVIOUS_FILE here — nothing recorded to roll back to.
+    That file is written by an upgrade, so roll back from the directory you
+    upgraded from."
+  # shellcheck disable=SC1090
+  . "./$PREVIOUS_FILE"
+  EXISTING_PROJECT="$(find_existing_project)"
+  PROJECT_ARGS=()
+  [ -z "$EXISTING_PROJECT" ] || [ "$EXISTING_PROJECT" = dfz ] || PROJECT_ARGS=(-p "$EXISTING_PROJECT")
+  step "Rolling back to backend ${PREV_BACKEND:-?}, ui ${PREV_UI:-?}"
+  dim "Those images are still on this host; nothing is downloaded."
+  run env BACKEND_TAG="${PREV_BACKEND:-}" UI_TAG="${PREV_UI:-}" \
+      TERMINAL_TAG="${PREV_TERMINAL:-}" GATEWAY_TAG="${PREV_GATEWAY:-}" \
+      "${COMPOSE[@]}" "${PROJECT_ARGS[@]}" up -d
+  step "Rolled back."
+  exit 0
+fi
+
 
 # docker load needs room for the images on top of the tar already on disk.
 TAR_KB=$(du -k images/images.tar | cut -f1)
@@ -425,6 +544,52 @@ else
   dim "is not left behind under the old project."
 fi
 
+# ── the plan ─────────────────────────────────────────────────────────────────
+# Said before anything moves, because "what is about to change" is the question
+# an operator has at this moment, and the answer used to be a shrug.
+step "What this will change"
+if print_plan; then
+  info "Every component already runs this bundle's version."
+fi
+
+# What to go back to, written BEFORE the change so it describes the state that
+# is about to be replaced. `--rollback` reads exactly this file.
+if [ "$DRY_RUN" = false ]; then
+  {
+    printf '# Written by install.sh before upgrading, for --rollback.\n'
+    printf 'PREV_BACKEND=%s\n'  "$(running_version_of backend)"
+    printf 'PREV_UI=%s\n'       "$(running_version_of ui)"
+    printf 'PREV_TERMINAL=%s\n' "$(running_version_of terminal)"
+    printf 'PREV_GATEWAY=%s\n'  "$(running_version_of gateway)"
+  } > "$PREVIOUS_FILE"
+fi
+
+# ── back up the database ─────────────────────────────────────────────────────
+# Only when there is something to lose: a first install has no data, and a
+# stopped stack cannot be dumped. Failure here STOPS the upgrade — proceeding
+# without the backup you were promised is worse than not upgrading.
+if [ "$BACKUP" = true ] && [ -n "$EXISTING_PROJECT" ] \
+   && [ "$(docker inspect -f '{{.State.Running}}' dfz-postgres 2>/dev/null || echo false)" = true ]; then
+  step "Backing up the database"
+  BACKUP_DIR="backups"
+  BACKUP_FILE="$BACKUP_DIR/dfz-$(date -u '+%Y%m%d-%H%M%S').sql.gz"
+  if [ "$DRY_RUN" = true ]; then
+    dim "would write $BACKUP_FILE"
+  else
+    mkdir -p "$BACKUP_DIR"
+    if docker exec dfz-postgres pg_dump -U dfz -d dfz 2>/dev/null | gzip > "$BACKUP_FILE"; then
+      info "Wrote $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+      dim "Restore: gunzip -c $BACKUP_FILE | docker exec -i dfz-postgres psql -U dfz -d dfz"
+    else
+      rm -f "$BACKUP_FILE"
+      die "The database dump failed, so nothing was upgraded.
+    Re-run with --no-backup to upgrade anyway, knowing there is no dump."
+    fi
+  fi
+elif [ "$BACKUP" = false ]; then
+  warn "Skipping the database backup (--no-backup)."
+fi
+
 # ── start ────────────────────────────────────────────────────────────────────
 step "Starting DFZ"
 run "${COMPOSE[@]}" "${COMPOSE_PROJECT_ARGS[@]}" up -d
@@ -456,9 +621,39 @@ while :; do
   sleep 5
 done
 
+# ── verify ───────────────────────────────────────────────────────────────────
+# The failure this exists for: the images loaded, compose reported success, and
+# the containers were still the old ones. Comparing image IDs settles it — the
+# same content keeps its ID through a retag into a private registry, so this
+# works in mirrored installs too.
+step "Verifying the running versions"
+VERIFY_FAILED=""
+for svc in $SERVICES; do
+  want_ref="ghcr.io/devopsfromzero/dfz-$svc:$(bundle_version_of "$svc")"
+  want_id="$(docker image inspect "$want_ref" --format '{{.Id}}' 2>/dev/null || true)"
+  got_id="$(docker inspect "$(container_for "$svc")" --format '{{.Image}}' 2>/dev/null || true)"
+  got_tag="$(running_version_of "$svc")"
+  if [ -z "$want_id" ] || [ -z "$got_id" ]; then
+    info "$svc: $got_tag (could not compare image ids)"
+  elif [ "$want_id" = "$got_id" ]; then
+    info "$svc: $got_tag  OK"
+  else
+    VERIFY_FAILED="$VERIFY_FAILED $svc"
+    warn "$svc: running $got_tag, which is NOT the image this bundle carries."
+  fi
+done
+if [ -n "$VERIFY_FAILED" ]; then
+  warn "Not upgraded:$VERIFY_FAILED"
+  warn "The stack is running, but on other images. '${COMPOSE[*]} ps' shows what."
+  exit 1
+fi
+
 URL="${APP_URL:-http://localhost:$UI_PORT}"
 step "DFZ is up — open $URL"
 info "You will be asked to create the admin account on first open; there is no default password."
+if [ -s "$PREVIOUS_FILE" ] && grep -q 'PREV_BACKEND=v' "$PREVIOUS_FILE" 2>/dev/null; then
+  info "To go back to the previous versions:  ./install.sh --rollback"
+fi
 
 if [ "$MODE" = local ]; then
   printf '\n'
