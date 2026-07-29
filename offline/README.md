@@ -97,13 +97,23 @@ DFZ only ever references that secret by name — it never sees the credentials.
 
 ## Upgrading
 
-Download the next bundle, extract it beside this one, and run its `install.sh`
-with the same `config.env`:
+Download the next bundle and extract it **over this directory** — the archive
+carries only the bundle's own files, so your `config.env`, `.env`, `backups/`
+and the rollback record stay exactly where they are. Then:
 
 ```bash
+cd ..                                # the directory ABOVE this one
+tar xzf dfz-offline-amd64.tar.gz     # replaces ./dfz-offline-amd64 in place
+cd dfz-offline-amd64
 ./install.sh --status     # what is installed, what this bundle would change
 ./install.sh              # upgrade
 ```
+
+The directory name is deliberately stable: with a dated one, `cd
+dfz-offline-*-amd64` stops being unambiguous the moment a second bundle is on
+the host, and running the older bundle's installer by accident is a mistake with
+no signal. Which bundle you have is in `VERSION`, and `install.sh` prints it on
+its first line.
 
 The upgrade, in order: it finds your existing stack, prints the plan
 (component by component, installed → bundle), **dumps the database** to

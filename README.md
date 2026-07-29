@@ -63,7 +63,7 @@ curl -LO https://github.com/devopsfromzero/dfz/releases/latest/download/dfz-offl
 curl -LO https://github.com/devopsfromzero/dfz/releases/latest/download/dfz-offline-amd64.tar.gz.sha256
 sha256sum -c dfz-offline-amd64.tar.gz.sha256
 
-tar xzf dfz-offline-amd64.tar.gz && cd dfz-offline-*-amd64
+tar xzf dfz-offline-amd64.tar.gz && cd dfz-offline-amd64
 cp config.env.example config.env      # your registry + credentials
 ./install.sh
 ```

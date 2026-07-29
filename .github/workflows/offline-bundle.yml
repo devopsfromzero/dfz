@@ -88,7 +88,7 @@ jobs:
             echo "curl -LO https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/dfz-offline-amd64.tar.gz"
             echo "curl -LO https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/dfz-offline-amd64.tar.gz.sha256"
             echo 'sha256sum -c dfz-offline-amd64.tar.gz.sha256'
-            echo 'tar xzf dfz-offline-amd64.tar.gz && cd dfz-offline-*-amd64'
+            echo 'tar xzf dfz-offline-amd64.tar.gz && cd dfz-offline-amd64'
             echo 'cp config.env.example config.env    # fill in your registry'
             echo './install.sh                        # or: ./install.sh --no-registry'
             echo '```'

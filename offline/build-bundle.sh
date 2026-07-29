@@ -5,7 +5,7 @@
 #   ./offline/build-bundle.sh --arch amd64 [--out dist]
 #
 # Run from an internet-connected machine (CI, normally). Produces
-# dist/dfz-offline-<date>-<arch>.tar.gz plus a .sha256 next to it.
+# dist/dfz-offline-<arch>.tar.gz plus a .sha256 next to it.
 #
 # The image list is READ FROM docker-compose.yml (`compose config --images`)
 # rather than restated here. That is the whole point: a service added to the
@@ -36,17 +36,24 @@ esac
 cd "$REPO"
 DATE="$(date -u '+%Y.%m.%d')"
 STAGE="$(mktemp -d)"
-# The extracted directory carries the date so two bundles on one host stay
-# apart. It no longer decides anything else: docker-compose.yml pins
-# `name: dfz`, so the compose project is the same whichever directory an
-# upgrade is run from. Before that pin, this date silently made every upgrade a
-# NEW compose project — colliding container names, and empty volumes beside the
-# operator's data. The TARBALL name deliberately carries no date: a stable
-# filename is what makes
+# The extracted directory has a STABLE name — no date. It used to carry one, to
+# keep two bundles on a host apart, and that turned out to cost more than it
+# bought: the documented `cd dfz-offline-*-amd64` becomes ambiguous the moment a
+# second directory exists, so an operator can land in the OLD bundle and run its
+# installer without noticing. A stable name also makes the extraction directory
+# the INSTALL directory — `config.env`, `.env`, `backups/` and the rollback
+# record are not in the archive, so extracting a new bundle over it leaves them
+# in place instead of asking the operator to copy them forward.
+#
+# What the date was really doing (keeping installs apart) is now done properly:
+# docker-compose.yml pins `name: dfz`. Which bundle this is stays answerable —
+# VERSION carries BUNDLE_DATE, and install.sh prints it on the first line.
+#
+# The tarball name has never carried a date, and that is what makes
 # .../releases/latest/download/dfz-offline-amd64.tar.gz a URL that keeps working,
 # which matters when the download instructions are on paper in an air-gapped
 # site. Which versions are inside is answered by VERSION and by the release.
-NAME="dfz-offline-$DATE-$ARCH"
+NAME="dfz-offline-$ARCH"
 ASSET="dfz-offline-$ARCH.tar.gz"
 trap 'rm -rf "$STAGE"' EXIT
 
