@@ -98,8 +98,28 @@ DFZ only ever references that secret by name — it never sees the credentials.
 ## Upgrading
 
 Download the next bundle, extract it beside this one, and run its `install.sh`
-with the same `config.env`. It pushes the new image versions and restarts the
-stack; your data lives in Docker volumes and is untouched.
+with the same `config.env`. It loads the new images, finds your existing stack
+and upgrades it in place. Your data lives in Docker volumes and stays where it
+is; the installer prints which compose project it is upgrading.
+
+**If you installed before 2026-07-29**, your stack runs under a compose project
+named after the directory you extracted that bundle into (for example
+`dfz-offline-20260728-amd64`), because the project name was not pinned yet.
+The installer detects that and keeps using it, so nothing moves. Two things
+follow from it:
+
+- If you upgrade WITHOUT `install.sh`, pass the project explicitly, or Compose
+  will start a second, empty stack beside your data:
+
+  ```bash
+  docker inspect dfz-backend \
+    --format '{{index .Config.Labels "com.docker.compose.project"}}'
+  ./install.sh --load-only                                            # load the images
+  docker compose -p <that-project> up -d                              # upgrade in place
+  ```
+
+- Every plain `docker compose` command you run for that stack needs the same
+  `-p <project>`. New installs do not: they use the pinned name `dfz`.
 
 ## Uninstall
 

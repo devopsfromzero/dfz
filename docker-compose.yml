@@ -37,6 +37,16 @@
 #     BACKEND_TAG / UI_TAG / TERMINAL_TAG / AGENT_TAG / GATEWAY_TAG
 #   Bleeding edge instead of the tested set:  TAG=latest docker compose up -d
 #
+# Project name is PINNED. Without it Compose derives the project from the
+# directory name — and the offline bundle extracts into a per-release directory,
+# so every upgrade became a DIFFERENT project: fixed container names collided
+# with the running stack (the upgrade appeared to "not take"), and the named
+# volumes — postgres-data, redis-data and backend-secrets, which holds the key
+# that decrypts every stored credential — were recreated EMPTY under the new
+# project while the old data sat untouched under the old one. Pinning the name
+# is what makes an upgrade land on the existing installation.
+name: dfz
+
 # Air-gapped / private-registry installs:
 #   REGISTRY       where the DFZ images live       (default ghcr.io/devopsfromzero)
 #   BASE_REGISTRY  where the third-party images live (default docker.io/library)

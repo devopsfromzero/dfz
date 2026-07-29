@@ -396,9 +396,38 @@ EOF
   info "Wrote $(pwd)/.env"
 fi
 
+# ── adopt an existing installation ───────────────────────────────────────────
+# docker-compose.yml pins `name: dfz`, so a fresh install is stable. But an
+# install made before that pin took its project name from the extraction
+# directory — which carries the bundle date, so every release produced a NEW
+# project. Coming up under a different project would create EMPTY postgres-data
+# / redis-data / backend-secrets volumes beside the operator's data and look
+# like a wiped install. So: if a DFZ stack is already here, upgrade THAT one.
+step "Looking for an existing installation"
+EXISTING_PROJECT=""
+for c in dfz-backend dfz-postgres dfz-ui; do
+  found="$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  [ -n "$found" ] || continue
+  EXISTING_PROJECT="$found"
+  break
+done
+
+COMPOSE_PROJECT_ARGS=()
+if [ -z "$EXISTING_PROJECT" ]; then
+  info "No existing stack found — installing as project 'dfz'."
+elif [ "$EXISTING_PROJECT" = dfz ]; then
+  info "Upgrading the existing 'dfz' installation."
+else
+  COMPOSE_PROJECT_ARGS=(-p "$EXISTING_PROJECT")
+  info "Found an existing installation under compose project '$EXISTING_PROJECT'."
+  dim "Upgrading it in place — its volumes (database, secrets) stay where they are."
+  dim "New installs use the pinned name 'dfz'; this one keeps its own so your data"
+  dim "is not left behind under the old project."
+fi
+
 # ── start ────────────────────────────────────────────────────────────────────
 step "Starting DFZ"
-run "${COMPOSE[@]}" up -d
+run "${COMPOSE[@]}" "${COMPOSE_PROJECT_ARGS[@]}" up -d
 
 if [ "$DRY_RUN" = true ]; then
   step "Dry run complete — nothing was changed."

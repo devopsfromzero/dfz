@@ -37,7 +37,12 @@ cd "$REPO"
 DATE="$(date -u '+%Y.%m.%d')"
 STAGE="$(mktemp -d)"
 # The extracted directory carries the date so two bundles on one host stay
-# apart. The TARBALL name deliberately does not: a stable filename is what makes
+# apart. It no longer decides anything else: docker-compose.yml pins
+# `name: dfz`, so the compose project is the same whichever directory an
+# upgrade is run from. Before that pin, this date silently made every upgrade a
+# NEW compose project — colliding container names, and empty volumes beside the
+# operator's data. The TARBALL name deliberately carries no date: a stable
+# filename is what makes
 # .../releases/latest/download/dfz-offline-amd64.tar.gz a URL that keeps working,
 # which matters when the download instructions are on paper in an air-gapped
 # site. Which versions are inside is answered by VERSION and by the release.
