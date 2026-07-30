@@ -51,10 +51,34 @@ jobs:
             # Strict full-line v<semver>: `latest`, `edge`, `sha-*` and the agent's
             # `-cloud` variants must never be mistaken for a release. -V so v0.10.0
             # sorts above v0.9.0, which a lexical sort gets backwards.
-            local image="$1" token tags
+            #
+            # MEASURED 2026-07-30 — this is why the loop exists. ghcr paginates
+            # /tags/list at 100 tags and hands back a `Link: rel="next"` header.
+            # dfz-agent had passed 100 tags (every commit pushes sha-* AND
+            # sha-*-cloud), so a freshly released v0.8.0 was simply not on the
+            # first page: this function answered v0.7.1, the bump logged
+            # "agent: v0.7.1 (current)", and the offline bundle would have shipped
+            # a stale agent to every cluster — silently. The source repo's parity
+            # gate caught it, which is what that gate is for, but the cause is here.
+            #
+            # `?n=1000` alone is not enough: a registry may cap the page size and
+            # answer with fewer, so the Link header is followed until it stops.
+            local image="$1" token url page tags all next
             token=$(curl -fsS "https://ghcr.io/token?scope=repository:devopsfromzero/${image}:pull&service=ghcr.io" | jq -r '.token')
-            tags=$(curl -fsS -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/devopsfromzero/${image}/tags/list" | jq -r '.tags[]')
-            printf '%s\n' "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
+            url="https://ghcr.io/v2/devopsfromzero/${image}/tags/list?n=1000"
+            all=""
+            # Bounded: 50 pages is far past any real repository, and a registry
+            # that keeps answering with a next-link must not loop forever.
+            for _ in $(seq 1 50); do
+              page=$(curl -fsS -D /tmp/ghcr-headers -H "Authorization: Bearer ${token}" "$url")
+              tags=$(printf '%s' "$page" | jq -r '.tags[]?')
+              all="${all}${tags}"$'\n'
+              # `Link: </v2/...?last=X&n=Y>; rel="next"`, relative to the registry.
+              next=$(grep -i '^link:' /tmp/ghcr-headers | sed -E 's/.*<([^>]+)>.*/\1/' | head -1 || true)
+              [ -n "$next" ] || break
+              url="https://ghcr.io${next}"
+            done
+            printf '%s\n' "$all" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
           }
 
           for entry in $MODULES; do
