@@ -10,6 +10,15 @@ Pins are bumped automatically as releases land on
 To move to an entry: `git checkout <that commit> && docker compose up -d`.
 To roll back: same, with an earlier one.
 
+## 2026-08-02
+
+- Base image change: `postgres:16-alpine` -> `pgvector/pgvector:pg16` (same
+  PostgreSQL 16 major; adds the pgvector extension used by the AI assistant's
+  semantic wiki search). Existing installs keep their data volume; after the
+  upgrade run once:
+  `docker exec dfz-postgres psql -U dfz -d dfz -c "REINDEX DATABASE dfz;"`
+  Air-gapped mirrors: override with `PGVECTOR_IMAGE`.
+
 <!-- new-entries-below -->
 
 ## 2026-07-30

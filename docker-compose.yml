@@ -469,7 +469,11 @@ services:
   # PostgreSQL — persistent store
   # ========================================
   postgres:
-    image: ${BASE_REGISTRY:-docker.io/library}/postgres:16-alpine
+    # postgres:16 + pgvector (AI asistaninin anlamsal wiki aramasi). library
+    # imaji olmadigi icin kendi degiskenini kullanir; air-gap'te PGVECTOR_IMAGE
+    # ile mirror'ini gosterin. MEVCUT kurulumda upgrade sonrasi bir kez:
+    #   docker exec dfz-postgres psql -U dfz -d dfz -c "REINDEX DATABASE dfz;"
+    image: ${PGVECTOR_IMAGE:-docker.io/pgvector/pgvector:pg16}
     pull_policy: ${PULL_POLICY:-missing}
     container_name: dfz-postgres
     restart: unless-stopped
