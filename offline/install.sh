@@ -414,6 +414,12 @@ target_for () {
   case "$1" in
     ghcr.io/devopsfromzero/*) printf '%s/%s' "$REGISTRY" "${1#ghcr.io/devopsfromzero/}" ;;
     docker.io/library/*)      printf '%s/%s' "$BASE_REGISTRY" "${1#docker.io/library/}" ;;
+    # A Docker Hub image outside `library/` — pgvector is the first one. The
+    # publisher's namespace is dropped exactly as `library/` is, so the mirror
+    # keeps ONE flat layout: BASE_REGISTRY/<name>:<tag>, whatever the source
+    # namespace was. Nesting it instead would make the mirror path depend on a
+    # third party's account name.
+    docker.io/*/*)            printf '%s/%s' "$BASE_REGISTRY" "${1##*/}" ;;
     *) die "Don't know which registry $1 belongs to — the manifest and this script disagree." ;;
   esac
 }
@@ -484,6 +490,16 @@ step "Writing .env"
 if [ "$MODE" = registry ]; then
   ENV_REGISTRY_LINE="REGISTRY=$REGISTRY"
   ENV_BASE_LINE="BASE_REGISTRY=$BASE_REGISTRY"
+  # postgres is the one service whose image does NOT follow BASE_REGISTRY:
+  # pgvector lives outside Docker Hub's `library/` namespace, so compose gives
+  # it its own variable. Without this line the mirror would hold the image and
+  # the stack would still ask docker.io for it — the exact failure an air-gapped
+  # site cannot recover from. Read from the manifest, not hardcoded, so a later
+  # pgvector tag needs no change here.
+  ENV_PGVECTOR_LINE="# PGVECTOR_IMAGE — no pgvector image in this bundle"
+  for img in $(grep '^docker\.io/pgvector/' images/manifest.txt || true); do
+    ENV_PGVECTOR_LINE="PGVECTOR_IMAGE=$(target_for "$img")"
+  done
   # The images are already on this host, so there is nothing to pull. `missing`
   # also keeps a later `up -d` on a second host working off the registry.
   ENV_PULL="missing"
@@ -492,6 +508,7 @@ else
   # tags that were just loaded.
   ENV_REGISTRY_LINE="# REGISTRY unset — running from the images loaded by install.sh"
   ENV_BASE_LINE="# BASE_REGISTRY unset — same reason"
+  ENV_PGVECTOR_LINE="# PGVECTOR_IMAGE unset — same reason"
   # `never` is the honest air-gap setting: a missing image fails immediately
   # with "image not found locally" instead of hanging on an unreachable registry.
   ENV_PULL="never"
@@ -508,6 +525,7 @@ else
 # Compose reads this automatically. Re-running install.sh rewrites it.
 $ENV_REGISTRY_LINE
 $ENV_BASE_LINE
+$ENV_PGVECTOR_LINE
 PULL_POLICY=$ENV_PULL
 EOF
   [ -z "$APP_URL" ] || printf 'APP_URL=%s\n' "$APP_URL" >> .env

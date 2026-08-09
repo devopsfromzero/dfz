@@ -72,9 +72,18 @@ echo "$IMAGES" | sed 's/^/    /'
 for img in $IMAGES; do
   case "$img" in
     ghcr.io/devopsfromzero/*|docker.io/library/*) ;;
+    # Docker Hub outside `library/`. target_for() can map these, but mapping is
+    # only half the job: a `library/` image follows BASE_REGISTRY straight from
+    # docker-compose.yml, while one of these needs its OWN compose variable and
+    # a matching line in install.sh's .env, or registry mode pushes it to the
+    # mirror and the stack still asks docker.io for it. So each one is listed
+    # here deliberately, once that wiring exists.
+    docker.io/pgvector/*) ;;
     *)
       echo "::error::$img is from a registry install.sh cannot map to a target." >&2
-      echo "Add a prefix rule to target_for() in offline/install.sh first." >&2
+      echo "Add a prefix rule to target_for() in offline/install.sh, give the" >&2
+      echo "service its own variable in docker-compose.yml, write that variable" >&2
+      echo "in install.sh's .env step, then list the prefix here." >&2
       exit 1 ;;
   esac
 done
