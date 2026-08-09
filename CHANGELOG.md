@@ -21,6 +21,12 @@ To roll back: same, with an earlier one.
 
 <!-- new-entries-below -->
 
+## 2026-08-09
+
+- backend `v2.15.0`
+- ui `v0.14.0`
+
+
 ## 2026-07-30
 
 - agent `v0.8.0`
