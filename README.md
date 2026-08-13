@@ -3,7 +3,6 @@
 > Kubernetes & Docker management dashboard. Self-hosted, single-command deploy.
 
 [![Website](https://img.shields.io/badge/website-devopsfromzero.com-7dd3fc)](https://www.devopsfromzero.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Images](https://img.shields.io/badge/images-ghcr.io-blue)](https://github.com/devopsfromzero?tab=packages)
 
 DFZ gives you a single UI to manage Kubernetes clusters, Docker hosts, terminals, and deployment workflows — all running from your own infrastructure.
