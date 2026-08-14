@@ -150,4 +150,10 @@ Found a bug or have a feature request? [Open an issue](https://github.com/devops
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+The files in this repository — the compose manifests, the offline bundle scripts
+and the documentation — are MIT licensed, so you can copy and adapt them freely
+for your own deployment. See [LICENSE](LICENSE).
+
+The DFZ application itself ships as container images and is not covered by that
+license: its source is maintained privately and is not published. DFZ is
+self-hosted, not open source.

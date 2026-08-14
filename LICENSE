@@ -1,3 +1,20 @@
+SCOPE OF THIS LICENSE
+=====================
+
+This license applies to the files in THIS repository — the deployment manifests
+(docker-compose.yml, Caddyfile), the offline bundle scripts, the documentation,
+and the issue/workflow templates. These are the files you copy and edit in order
+to run DFZ, so they are provided under the permissive terms below.
+
+It does NOT apply to the DFZ application itself. The application is distributed
+as container images from ghcr.io/devopsfromzero; its source code is maintained
+privately and is not published. Nothing in this file grants any right in those
+images.
+
+In the text below, "the Software" means the files in this repository only.
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 MIT License
 
 Copyright (c) 2026 devopsfromzero
