@@ -360,7 +360,7 @@ services:
   # Terminal — stateful exec/SSH sessions (single-worker)
   # ========================================
   terminal:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-v1.2.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-v1.2.2}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-terminal
     restart: unless-stopped
