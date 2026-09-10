@@ -500,6 +500,13 @@ if [ "$MODE" = registry ]; then
   for img in $(grep '^docker\.io/pgvector/' images/manifest.txt || true); do
     ENV_PGVECTOR_LINE="PGVECTOR_IMAGE=$(target_for "$img")"
   done
+  # Same reasoning for the object store: Docker Hub, outside `library/`, so it
+  # cannot follow BASE_REGISTRY from docker-compose.yml and carries its own
+  # variable. Read from the manifest (tag included) rather than hardcoded.
+  ENV_STORAGE_LINE="# STORAGE_IMAGE — no object-store image in this bundle"
+  for img in $(grep '^docker\.io/chrislusf/' images/manifest.txt || true); do
+    ENV_STORAGE_LINE="STORAGE_IMAGE=$(target_for "$img")"
+  done
   # The images are already on this host, so there is nothing to pull. `missing`
   # also keeps a later `up -d` on a second host working off the registry.
   ENV_PULL="missing"
@@ -509,6 +516,7 @@ else
   ENV_REGISTRY_LINE="# REGISTRY unset — running from the images loaded by install.sh"
   ENV_BASE_LINE="# BASE_REGISTRY unset — same reason"
   ENV_PGVECTOR_LINE="# PGVECTOR_IMAGE unset — same reason"
+  ENV_STORAGE_LINE="# STORAGE_IMAGE unset — same reason"
   # `never` is the honest air-gap setting: a missing image fails immediately
   # with "image not found locally" instead of hanging on an unreachable registry.
   ENV_PULL="never"
@@ -526,6 +534,7 @@ else
 $ENV_REGISTRY_LINE
 $ENV_BASE_LINE
 $ENV_PGVECTOR_LINE
+$ENV_STORAGE_LINE
 PULL_POLICY=$ENV_PULL
 EOF
   [ -z "$APP_URL" ] || printf 'APP_URL=%s\n' "$APP_URL" >> .env

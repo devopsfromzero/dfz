@@ -79,6 +79,7 @@ for img in $IMAGES; do
     # mirror and the stack still asks docker.io for it. So each one is listed
     # here deliberately, once that wiring exists.
     docker.io/pgvector/*) ;;
+    docker.io/chrislusf/*) ;;   # object store — wired via ${STORAGE_IMAGE}
     *)
       echo "::error::$img is from a registry install.sh cannot map to a target." >&2
       echo "Add a prefix rule to target_for() in offline/install.sh, give the" >&2
