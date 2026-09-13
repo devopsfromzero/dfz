@@ -23,6 +23,11 @@ To roll back: same, with an earlier one.
 
 ## 2026-09-13
 
+- ui `v0.23.0`
+
+
+## 2026-09-13
+
 - backend `v2.22.0`
 - terminal `v1.3.0`
 - agent `v0.9.0`

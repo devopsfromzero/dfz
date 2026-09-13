@@ -445,7 +445,7 @@ services:
   # UI — Next.js frontend (internal; published via the Caddy edge)
   # ========================================
   ui:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-v0.22.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-ui:${UI_TAG:-${TAG:-v0.23.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-ui
     restart: unless-stopped
