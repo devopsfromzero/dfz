@@ -137,7 +137,7 @@ x-app-env: &app-env
   # air-gapped site needs the registry typed in by hand. Deriving also puts this
   # pin under the same parity check as the local-agent service's image line, so
   # it can no longer drift a release behind on its own.
-  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.8.1}}}"
+  DFZ_AGENT_IMAGE: "${DFZ_AGENT_IMAGE:-${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.9.0}}}"
   DFZ_AGENT_SERVER_URL: "${DFZ_AGENT_SERVER_URL:-${APP_URL:-http://localhost:3080}}"
   DFZ_GATEWAY_PROXY_URL: "${DFZ_GATEWAY_PROXY_URL:-http://gateway:3092}"
   # Collection cadence: the worker pulls each agent's usage/events windows into
@@ -202,7 +202,7 @@ services:
   # Backend — FastAPI (stateless, multi-worker)
   # ========================================
   backend:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.21.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.22.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-backend
     restart: unless-stopped
@@ -266,7 +266,7 @@ services:
   # them for the event loop. Nothing routes here (Caddy → UI → backend).
   # --workers 1 keeps a single process holding the PG leader lock.
   worker:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.21.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.22.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-worker
     restart: unless-stopped
@@ -336,7 +336,7 @@ services:
   # It takes a distinct PG advisory leader lock (base+2), so it leads its own
   # group independently of the core worker.
   worker-monitoring:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.21.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-backend:${BACKEND_TAG:-${TAG:-v2.22.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-worker-monitoring
     restart: unless-stopped
@@ -389,7 +389,7 @@ services:
   # Terminal — stateful exec/SSH sessions (single-worker)
   # ========================================
   terminal:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-v1.2.2}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-terminal:${TERMINAL_TAG:-${TAG:-v1.3.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-terminal
     restart: unless-stopped
@@ -784,7 +784,7 @@ services:
   # For a cluster on THIS host whose kubeconfig says 127.0.0.1 (kind, minikube),
   # point the kubeconfig server at host.docker.internal instead.
   local-agent:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.8.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.9.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-local-agent
     restart: unless-stopped
@@ -868,7 +868,7 @@ services:
   #   1. log in at :3080 → add cluster (Agent tab) → copy the token
   #   2. DFZ_AGENT_TOKEN=<token> docker compose --profile agent up -d agent
   agent:
-    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.8.1}}
+    image: ${REGISTRY:-ghcr.io/devopsfromzero}/dfz-agent:${AGENT_TAG:-${TAG:-v0.9.0}}
     pull_policy: ${PULL_POLICY:-always}
     container_name: dfz-agent-test
     restart: unless-stopped

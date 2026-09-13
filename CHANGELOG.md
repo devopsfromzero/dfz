@@ -21,6 +21,13 @@ To roll back: same, with an earlier one.
 
 <!-- new-entries-below -->
 
+## 2026-09-13
+
+- backend `v2.22.0`
+- terminal `v1.3.0`
+- agent `v0.9.0`
+
+
 ## 2026-08-22
 
 - backend `v2.21.1`
