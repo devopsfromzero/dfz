@@ -116,6 +116,28 @@ Want the bleeding edge instead of the tested set? `TAG=latest docker compose up 
 
 Available tags at [ghcr.io/devopsfromzero](https://github.com/devopsfromzero?tab=packages).
 
+### Air-gapped hosts
+
+The commands above need the internet twice, so they are not the upgrade path for
+a host that has none. Download the next bundle where you have a network, carry it
+over, and extract it **over the directory you installed from** — the archive
+holds only the bundle's own files (`install.sh`, `docker-compose.yml`,
+`Caddyfile`, `VERSION`, `config.env.example`, `images/`), so your `config.env`,
+`.env`, `backups/` and `kubeconfig/` are not in it and stay where they are:
+
+```bash
+cd ..                                # the directory ABOVE dfz-offline-amd64
+tar xzf dfz-offline-amd64.tar.gz     # replaces ./dfz-offline-amd64 in place
+cd dfz-offline-amd64
+./install.sh --status                # what is installed, what this bundle changes
+./install.sh                         # upgrade
+```
+
+It keeps the mode you installed with, dumps the database to `backups/` first, and
+verifies afterwards that what is running really is this bundle's images — by id,
+not by tag. `./install.sh --rollback` puts the previous set back. Full detail:
+[`offline/README.md`](offline/README.md).
+
 ## Troubleshooting
 
 **UI loads but can't log in / CORS error.**

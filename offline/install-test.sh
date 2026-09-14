@@ -113,6 +113,32 @@ else
 fi
 rm -rf "$dir"
 
+# ── the upgrade promise: the archive must not carry operator files ───────────
+# Both READMEs tell people to extract the new bundle OVER the directory they
+# installed from, and say their own files survive because the archive does not
+# contain them. That is a promise about build-bundle.sh, and it is the kind that
+# breaks quietly: adding one `cp .env` there would make every upgrade overwrite
+# the operator's configuration, and nothing would fail — it would just be gone.
+BUILDER="$HERE/build-bundle.sh"
+[ -f "$BUILDER" ] || { echo "FAIL  build-bundle.sh not found"; exit 1; }
+
+# What the builder actually stages, read from the file rather than assumed.
+staged="$(grep -E '^\s*cp .*"\$STAGE' "$BUILDER")"
+# Positive control: an empty scan would let every assertion below pass.
+[ -n "$staged" ] || { echo "FAIL  found no staging 'cp' lines — the scan is broken"; exit 1; }
+ok "builder staging lines found (positive control)"
+
+for f in '.env' 'config.env' 'backups'; do
+  # config.env.example is a template and belongs in the archive; config.env is
+  # the operator's filled-in copy and must never be.
+  if printf '%s\n' "$staged" | grep -E "(^|[^.a-zA-Z0-9_-])$f([^.a-zA-Z0-9_-]|$)" \
+       | grep -qv 'config.env.example'; then
+    bad "build-bundle.sh stages '$f' — an upgrade would overwrite it"
+  else
+    ok "archive does not carry '$f'"
+  fi
+done
+
 rm -f "$FN"
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
