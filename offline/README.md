@@ -109,6 +109,12 @@ cd dfz-offline-amd64
 ./install.sh              # upgrade
 ```
 
+No flags on the second line: the installer continues in the mode the stack was
+installed with. It reads that from the `.env` it wrote the first time, so a host
+installed with `--no-registry` is upgraded without one and is never asked for a
+registry it does not have. Passing `--no-registry` again is equivalent and does
+no harm.
+
 The directory name is deliberately stable: with a dated one, `cd
 dfz-offline-*-amd64` stops being unambiguous the moment a second bundle is on
 the host, and running the older bundle's installer by accident is a mistake with

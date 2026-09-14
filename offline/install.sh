@@ -198,6 +198,16 @@ read_settings () {
   done < "$file"
 }
 
+# An install done with --no-registry leaves a record: the .env this script
+# writes says so, in the file Compose already reads. Local mode is the only one
+# that sets PULL_POLICY=never AND leaves REGISTRY unset (registry mode writes
+# REGISTRY=… and PULL_POLICY=missing), so the two together are unambiguous.
+previous_install_was_local () {
+  [ -f .env ] || return 1
+  grep -q '^PULL_POLICY=never[[:space:]]*$' .env || return 1
+  ! grep -q '^REGISTRY=' .env
+}
+
 CONFIG_LOADED=false
 if [ -f "$CONFIG_FILE" ]; then
   read_settings "$CONFIG_FILE"
@@ -208,7 +218,20 @@ elif [ "$MODE" = registry ] && [ "$LOAD_ONLY" = false ]      && [ "$STATUS_ONLY"
   # --status only reads, and --rollback runs images that are already here:
   # neither may be blocked by a missing config, or the two commands you need
   # when something has gone wrong are the two you cannot run.
-  die "No $CONFIG_FILE and no REGISTRY set. Copy config.env.example to config.env and fill it in, or use --no-registry."
+  #
+  # An UPGRADE of a local-mode install is the fourth. README's upgrade steps are
+  # `./install.sh --status` then `./install.sh` — no flags, because the second
+  # run is meant to continue what the first one set up. Without the check below
+  # that plain `./install.sh` died with "No config.env and no REGISTRY set" on
+  # every host installed with --no-registry: the documented upgrade path was
+  # unreachable, and the suggested fix (fill in a registry) was the wrong advice
+  # for a machine that deliberately has none.
+  if previous_install_was_local; then
+    MODE=local
+    info "Continuing in local mode — .env says this install was made with --no-registry."
+  else
+    die "No $CONFIG_FILE and no REGISTRY set. Copy config.env.example to config.env and fill it in, or use --no-registry."
+  fi
 fi
 
 # Environment wins over the file: CI and config-management tools should be able

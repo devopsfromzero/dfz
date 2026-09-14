@@ -32,6 +32,13 @@ jobs:
           docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
+      # The installer decides things before it touches Docker: which mode to run
+      # in, and whether to refuse to start at all. An upgrade of a --no-registry
+      # install was impossible through the documented path because that decision
+      # was wrong; these tests pin it down. No daemon, no images, no network.
+      - name: Installer decision logic
+        run: bash offline/install-test.sh
+
       # Bundle invariant: every DFZ image default must be a released v-pin.
       # A `:latest` default would silently make two clones of the same commit run
       # different stacks — exactly what pinning exists to prevent.
