@@ -93,8 +93,23 @@ echo "==> Pulling for linux/$ARCH"
 # --platform on an amd64 runner still fetches the arm64 image; it is stored and
 # saved fine, it just cannot be executed here. That is what lets one runner
 # build both bundles.
+# Registries reset connections. One such reset used to throw away the whole
+# bundle: ten images are pulled here, and `set -e` turned a transient
+# "connection reset by peer" on the fourth into a failed build with nine images
+# already downloaded. Retrying costs seconds; rebuilding costs the run.
+pull_with_retry () {
+  local img="$1" try
+  for try in 1 2 3; do
+    if docker pull --quiet --platform "linux/$ARCH" "$img"; then return 0; fi
+    echo "    pull failed (attempt $try/3): $img" >&2
+    sleep $((try * 5))
+  done
+  echo "Giving up on $img after 3 attempts." >&2
+  return 1
+}
+
 for img in $IMAGES; do
-  docker pull --quiet --platform "linux/$ARCH" "$img"
+  pull_with_retry "$img"
 done
 
 echo "==> Assembling $NAME"
